@@ -46,9 +46,10 @@ npm run sim -- 1000 1
 2. PC の IP アドレスを調べる（PowerShell で `ipconfig` の「IPv4 アドレス」、例 192.168.1.23）
 3. スマホのブラウザで `http://192.168.1.23:8000/` を開く
 
-**GitHub Pages に置く**（インターネットに公開される。置くかどうかはまだ決めていない）:
-リポジトリを GitHub に push し、Settings → Pages で main ブランチのルートを選ぶ。
-ホーム画面に置く（PWA）には https が要るので、そのときはこちらになる。`manifest.webmanifest` はもう用意してある。
+**GitHub Pages で開く**（公開中）: https://bukenix1-tech.github.io/league-sim/
+
+main ブランチに push すると、1〜2 分でこのページが新しくなる（Settings → Pages で main ブランチのルートを配る設定）。
+ホーム画面に置く（PWA）には https が要るので、こちらを使う。
 
 ## しくみ
 
