@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#14532d">
+  <title>リーグ運営シム</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="src/ui/style.css">
+</head>
+<body>
+  <header>
+    <h1>リーグ運営シム <small>段階 1</small></h1>
+  </header>
+  <main>
+    <section class="controls">
+      <label>乱数の種
+        <input id="seed" type="number" inputmode="numeric" placeholder="空ならおまかせ">
+      </label>
+      <button id="run" type="button">1 シーズンを回す</button>
+    </section>
+    <p id="status" class="status">ボタンを押すと 38 節を回して順位表を出します。</p>
+    <table id="table" hidden>
+      <thead>
+        <tr><th>#</th><th class="club">クラブ</th><th>試</th><th>勝</th><th>分</th><th>敗</th><th>差</th><th>点</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p id="legend" class="legend" hidden><span class="swatch champ"></span>優勝 <span class="swatch down"></span>降格圏</p>
+    <details id="rounds" hidden>
+      <summary>全試合の結果</summary>
+      <div id="round-list"></div>
+    </details>
+  </main>
+  <script type="module" src="src/ui/app.js"></script>
+</body>
+</html>

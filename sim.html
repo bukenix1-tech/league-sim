@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>まとめ</title>
+  <link rel="stylesheet" href="src/ui/style.css">
+</head>
+<body>
+  <main>
+    <h1>何シーズンも回したまとめ</h1>
+    <section class="controls">
+      <label>回数 <input id="runs" type="number" inputmode="numeric" value="1000"></label>
+      <label>種 <input id="seed" type="number" inputmode="numeric" value="1"></label>
+      <button id="go" type="button">回す</button>
+    </section>
+    <pre id="out" class="status"></pre>
+  </main>
+  <script type="module">
+    import { formatSummary } from "./src/engine/format.js";
+    import { summarize } from "./src/engine/summary.js";
+    import { parseClubData } from "./src/engine/clubs.js";
+    const clubs = parseClubData(await (await fetch("data/clubs.json")).json()).divisions[0].clubs;
+    const out = document.getElementById("out");
+    document.getElementById("go").addEventListener("click", () => {
+      out.textContent = "計算中…";
+      setTimeout(() => {
+        const runs = Number(document.getElementById("runs").value);
+        const seed = Number(document.getElementById("seed").value);
+        const t0 = performance.now();
+        const s = summarize(clubs, runs, seed);
+        out.textContent = formatSummary(s, clubs, seed) + `\n\n(${((performance.now() - t0) / 1000).toFixed(1)} 秒)`;
+      }, 0);
+    });
+  </script>
+</body>
+</html>

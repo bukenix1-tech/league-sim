@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>試験</title>
+  <link rel="stylesheet" href="src/ui/style.css">
+  <style>.pass { color: var(--accent); } .fail { color: #dc2626; } li { margin: 4px 0; }</style>
+</head>
+<body>
+  <main>
+    <h1>試験</h1>
+    <p id="summary" class="status">実行中…</p>
+    <ul id="list"></ul>
+  </main>
+  <script type="module">
+    import { makeCases, runCases } from "./tests/cases.js";
+    const clubJson = await (await fetch("data/clubs.json")).json();
+    const results = runCases(makeCases(clubJson));
+    const failed = results.filter((r) => r.error);
+    document.getElementById("list").replaceChildren(...results.map((r) => {
+      const li = document.createElement("li");
+      li.className = r.error ? "fail" : "pass";
+      li.textContent = `${r.error ? "✗" : "✓"} ${r.name}${r.error ? ` — ${r.error}` : ""}`;
+      return li;
+    }));
+    const summary = document.getElementById("summary");
+    summary.textContent = `${results.length} 件中 ${results.length - failed.length} 件成功`;
+    summary.dataset.failed = String(failed.length);
+  </script>
+</body>
+</html>

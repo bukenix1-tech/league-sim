@@ -1,0 +1,11 @@
+{
+  "name": "league-sim",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/test.mjs",
+    "season": "node scripts/run-season.mjs",
+    "sim": "node scripts/simulate.mjs",
+    "typecheck": "npx -p typescript tsc --noEmit -p jsconfig.json"
+  }
+}
