@@ -8,7 +8,7 @@
  * @typedef {{ version: number, given: string[], family: string[] }} NameData
  */
 
-export const CLUB_DATA_VERSION = 2;
+export const CLUB_DATA_VERSION = 3;
 export const NAME_DATA_VERSION = 1;
 
 /**
@@ -24,10 +24,14 @@ export function parseClubData(data) {
     const ids = div.clubs.map((/** @type {Club} */ c) => c.id);
     if (new Set(ids).size !== ids.length) throw new Error(`${div.name}: クラブの id が重複しています`);
     if (ids.length % 2 !== 0) throw new Error(`${div.name}: クラブの数は偶数にしてください`);
+    if (ids.length < 8) throw new Error(`${div.name}: クラブは 8 つ以上にしてください`);
     for (const c of div.clubs) {
       if (!(c.level >= 1 && c.level <= 99)) throw new Error(`${c.name}: level は 1〜99 にしてください`);
     }
   }
+  if (data.divisions.length !== 2) throw new Error("部は 2 つ (1 部と 2 部) にしてください");
+  const all = data.divisions.flatMap((/** @type {Division} */ d) => d.clubs.map((c) => c.id));
+  if (new Set(all).size !== all.length) throw new Error("1 部と 2 部でクラブの id が重複しています");
   return data;
 }
 

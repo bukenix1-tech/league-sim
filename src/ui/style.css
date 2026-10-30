@@ -8,6 +8,7 @@
   --accent-fg: #ffffff;
   --champ: #dcfce7;
   --down: #fee2e2;
+  --po: #fef9c3;
   --tab-bg: #e7ebe6;
   --g-high: #15803d;
   --g-mid: #a16207;
@@ -24,6 +25,7 @@
     --accent-fg: #052e16;
     --champ: #14361f;
     --down: #3d1a1a;
+    --po: #3a3412;
     --tab-bg: #222722;
     --g-high: #4ade80;
     --g-mid: #facc15;
@@ -64,6 +66,27 @@ input, select { padding: 8px 10px; border: 1px solid var(--line); background: va
 }
 button:active { opacity: 0.8; }
 button:disabled { opacity: 0.5; }
+.controls button.secondary, .save button.secondary, .file-button {
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--line);
+}
+.save button, .file-button { flex: 1 1 120px; padding: 10px 16px; border-radius: 8px; font-weight: bold; border: 0; }
+.save button.danger { background: #b91c1c; color: #fff; }
+.file-button { display: flex; align-items: center; justify-content: center; min-height: 44px; cursor: pointer; }
+.file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.save { margin-top: 24px; }
+.save summary { font-weight: bold; }
+.save .row { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; margin-top: 10px; }
+.save .grow { display: flex; flex-direction: column; font-size: 0.8rem; color: var(--muted); flex: 1 1 140px; }
+
+/* 1 部・2 部の切りかえ */
+.seg { display: flex; gap: 0; margin: 0 0 10px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { flex: 1; border: 0; border-radius: 0; background: var(--card); color: var(--muted); min-height: 36px; padding: 4px; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); font-weight: bold; }
+tr.po { background: var(--po); }
+.swatch.po { background: var(--po); }
+.year h2 { margin-bottom: 2px; }
 .status { color: var(--muted); font-size: 0.85rem; }
 
 /* タブ */

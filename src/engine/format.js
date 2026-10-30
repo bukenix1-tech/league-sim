@@ -67,3 +67,44 @@ export function formatTable(rows, clubs) {
   });
   return lines.join("\n");
 }
+
+/**
+ * @param {ReturnType<typeof import("./longrun.js").longRun>} r
+ */
+export function formatLongRun(r) {
+  const name = (/** @type {string} */ id) => r.league.clubs[id]?.name ?? id;
+  const n = r.rows.length;
+  const first = r.rows.slice(0, 5);
+  const last = r.rows.slice(-5);
+  const avg = (/** @type {number[]} */ xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  /** @param {typeof r.rows} rows */
+  const line = (rows) =>
+    `1 部 ${avg(rows.map((x) => x.top11[0])).toFixed(1)} / 2 部 ${avg(rows.map((x) => x.top11[1])).toFixed(1)} / ` +
+    `一番うまい選手 ${avg(rows.map((x) => x.best)).toFixed(1)} / 選手 ${avg(rows.map((x) => x.players)).toFixed(0)} 人 / ` +
+    `平均 ${avg(rows.map((x) => x.avgAge)).toFixed(1)} 歳 / 21 歳以下 ${avg(rows.map((x) => x.young)).toFixed(0)} 人`;
+  return [
+    `${n} 年 回したまとめ`,
+    "",
+    "■ 優勝の偏り",
+    `  優勝したクラブの数 ${r.distinctChampions}（本物の 1 部は 50 年でおよそ 10〜15）`,
+    `  一番多いクラブ ${name(r.titles[0][0])} ${r.titles[0][1]} 回（${((r.titles[0][1] / n) * 100).toFixed(0)}%）`,
+    `  一番長い連覇 ${name(r.longestStreak.club)} ${r.longestStreak.years} 連覇`,
+    `  優勝した回数: ${r.titles.map(([id, c]) => `${r.league.clubs[id]?.short ?? id} ${c}`).join("、")}`,
+    `  始めは 2 部だったのに 1 部で優勝したクラブ: ${r.div2Champions.map(name).join("、") || "なし"}`,
+    `  ${n} 年ずっと 1 部にいたクラブ: ${r.alwaysTop.length} クラブ（${r.alwaysTop.map((id) => r.league.clubs[id]?.short ?? id).join("、")}）`,
+    `  昇格したクラブが次の年も 1 部に残った割合 ${(r.promotedSurvival * 100).toFixed(0)}%（本物はおよそ 55〜65%）`,
+    `  優勝クラブの勝ち点の平均 ${avg(r.rows.map((x) => x.championPoints)).toFixed(1)}（本物は 85〜95）`,
+    "",
+    "■ 能力と選手の数（各クラブの上位 11 人の総合力の平均）",
+    `  はじめの 5 年: ${line(first)}`,
+    `  おわりの 5 年: ${line(last)}`,
+    "",
+    "■ 重さ",
+    `  1 年あたり ${r.msPerYear.toFixed(0)} ミリ秒、セーブの大きさ ${(r.saveBytes / 1024).toFixed(0)} KB`,
+    "",
+    "■ 10 年ごと",
+    ...r.rows
+      .filter((_, i) => i % 10 === 9)
+      .map((x) => `  ${x.year} 年  優勝 ${r.league.clubs[x.champion]?.short}（${x.championPoints}）  1 部 ${x.top11[0].toFixed(1)}  2 部 ${x.top11[1].toFixed(1)}  選手 ${x.players} 人`),
+  ].join("\n");
+}

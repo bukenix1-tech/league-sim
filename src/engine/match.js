@@ -20,14 +20,14 @@ export const AWAY_FACTOR = 0.9;
 export const ASSIST_RATE = 0.7;
 
 /**
- * [ホームの得点の期待値, アウェーの得点の期待値]
- * @param {Side} home @param {Side} away
+ * [ホームの得点の期待値, アウェーの得点の期待値]。neutral なら中立の場所（プレーオフの決勝）でホームの有利が無い。
+ * @param {Side} home @param {Side} away @param {boolean} [neutral]
  * @returns {[number, number]}
  */
-export function expectedGoals(home, away) {
+export function expectedGoals(home, away, neutral = false) {
   return [
-    (BASE_GOALS * HOME_ADVANTAGE * home.attack) / away.defense,
-    (BASE_GOALS * AWAY_FACTOR * away.attack) / home.defense,
+    (BASE_GOALS * (neutral ? 1 : HOME_ADVANTAGE) * home.attack) / away.defense,
+    (BASE_GOALS * (neutral ? 1 : AWAY_FACTOR) * away.attack) / home.defense,
   ];
 }
 
@@ -79,10 +79,11 @@ export function assignGoals(rng, club, lineup, count) {
  * @param {{ id: string, side: Side, lineup: Slot[] }} home
  * @param {{ id: string, side: Side, lineup: Slot[] }} away
  * @param {Rng} rng
+ * @param {boolean} [neutral] 中立の場所
  * @returns {MatchResult}
  */
-export function playMatch(home, away, rng) {
-  const [homeXg, awayXg] = expectedGoals(home.side, away.side);
+export function playMatch(home, away, rng, neutral = false) {
+  const [homeXg, awayXg] = expectedGoals(home.side, away.side, neutral);
   const homeGoals = poisson(rng, homeXg);
   const awayGoals = poisson(rng, awayXg);
   return {

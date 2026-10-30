@@ -6,6 +6,7 @@
     "test": "node scripts/test.mjs",
     "season": "node scripts/run-season.mjs",
     "sim": "node scripts/simulate.mjs",
+    "long": "node scripts/long-run.mjs",
     "typecheck": "npx -p typescript tsc --noEmit -p jsconfig.json"
   }
 }

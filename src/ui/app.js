@@ -1,16 +1,17 @@
 // @ts-check
-// 画面。計算は src/engine/ にあり、ここでは表示だけをする。
+// 画面。計算は src/engine/ にあり、ここでは表示とセーブの出し入れだけをする。
 
 import { parseClubData, parseNameData } from "../engine/clubs.js";
+import { AUTO_PROMOTED, createLeague, PLAYOFF_FROM, PLAYOFF_TO, playYear, rowGoalDiff, rowPoints } from "../engine/league.js";
 import { ATTR_LABEL, ATTRS, grade, overall, TRAITS } from "../engine/players.js";
 import { randomSeed } from "../engine/rng.js";
-import { leaders, playSeason } from "../engine/season.js";
-import { goalDiff, points } from "../engine/table.js";
-import { generateWorld, STYLES } from "../engine/world.js";
+import { parseSave, serialize } from "../engine/save.js";
+import { STYLES } from "../engine/world.js";
+import { loadStoredSave, storeSave } from "./storage.js";
 
 /**
- * @typedef {import("../engine/clubs.js").Club} Club
- * @typedef {import("../engine/world.js").World} World
+ * @typedef {import("../engine/league.js").League} League
+ * @typedef {import("../engine/league.js").YearRecord} YearRecord
  * @typedef {import("../engine/season.js").SeasonResult} SeasonResult
  * @typedef {import("../engine/players.js").Player} Player
  */
@@ -31,56 +32,75 @@ function el(tag, cls, text) {
 /** @param {number} n */
 const signed = (n) => (n > 0 ? `+${n}` : String(n));
 
-/** 今の表示に使っているもの */
-const view = {
-  /** @type {World | null} */ world: null,
-  /** @type {SeasonResult | null} */ season: null,
+const ui = {
+  /** @type {League | null} */ league: null,
+  /** 直前に回したシーズン（試合の結果。セーブには入れない） @type {SeasonResult[] | null} */ seasons: null,
+  div: 0,
   clubId: "",
+  busy: false,
 };
 
-async function loadData() {
-  const [clubJson, nameJson] = await Promise.all(
-    ["data/clubs.json", "data/names.json"].map((u) => fetch(u).then((r) => r.json())),
-  );
-  return { clubs: parseClubData(clubJson).divisions[0].clubs, names: parseNameData(nameJson) };
-}
-
-/** @param {string} id */
-const clubOf = (id) => /** @type {World} */ (view.world).clubs.find((c) => c.id === id);
-/** @param {string} id */
-const playerOf = (id) => /** @type {Player} */ (/** @type {World} */ (view.world).players.get(id));
+const L = () => /** @type {League} */ (ui.league);
+const lastRecord = () => /** @type {YearRecord | undefined} */ (L().history[L().history.length - 1]);
+const clubName = (/** @type {string} */ id) => L().clubs[id]?.name ?? id;
+const clubShort = (/** @type {string} */ id) => L().clubs[id]?.short ?? id;
 
 /** @param {string} tab */
 function showTab(tab) {
   for (const b of document.querySelectorAll("#tabs button")) {
     b.setAttribute("aria-selected", String(/** @type {HTMLElement} */ (b).dataset.tab === tab));
   }
-  for (const name of ["table", "leaders", "club", "rounds"]) $(`tab-${name}`).hidden = name !== tab;
+  for (const name of ["table", "leaders", "club", "rounds", "history"]) $(`tab-${name}`).hidden = name !== tab;
+  $("div-switch").hidden = !["table", "leaders", "rounds"].includes(tab);
+}
+
+/** @param {number} div */
+function setDiv(div) {
+  ui.div = div;
+  for (const b of document.querySelectorAll("#div-switch button")) {
+    b.setAttribute("aria-pressed", String(Number(/** @type {HTMLElement} */ (b).dataset.div) === div));
+  }
+  renderTable();
+  renderLeaders();
+  renderRounds();
 }
 
 /** @param {string} clubId */
 function openClub(clubId) {
-  view.clubId = clubId;
+  ui.clubId = clubId;
   /** @type {HTMLSelectElement} */ ($("club-select")).value = clubId;
   renderClub();
   showTab("club");
   window.scrollTo({ top: 0 });
 }
 
+/** @param {string} text */
+const empty = (text) => el("p", "status", text);
+
 function renderTable() {
-  const season = /** @type {SeasonResult} */ (view.season);
-  const n = season.standings.length;
+  const rec = lastRecord();
   const tbody = /** @type {HTMLTableSectionElement} */ ($("table").querySelector("tbody"));
+  if (!rec) {
+    tbody.replaceChildren();
+    $("table-legend").textContent = "まだシーズンを回していません。「1 年進める」を押してください。";
+    $("playoff").replaceChildren();
+    return;
+  }
+  const rows = rec.tables[ui.div];
+  const n = rows.length;
   tbody.replaceChildren(
-    ...season.standings.map((r, i) => {
-      const tr = el("tr", i === 0 ? "champ" : i >= n - 3 ? "down" : "");
-      const club = clubOf(r.id);
-      const cells = [i + 1, club?.short ?? r.id, r.played, r.won, r.drawn, r.lost, signed(goalDiff(r)), points(r)];
+    ...rows.map((r, i) => {
+      let cls = "";
+      if (ui.div === 0) cls = i === 0 ? "champ" : i >= n - 3 ? "down" : "";
+      else cls = i < AUTO_PROMOTED ? "champ" : i >= PLAYOFF_FROM - 1 && i < PLAYOFF_TO ? "po" : "";
+      const tr = el("tr", cls);
+      const label = `${clubShort(r[0])}${ui.div === 1 && r[0] === rec.playoff.winner ? " ★" : ""}`;
+      const cells = [i + 1, label, r[1] + r[2] + r[3], r[1], r[2], r[3], signed(rowGoalDiff(r)), rowPoints(r)];
       cells.forEach((v, j) => {
         const td = el("td", j === 1 ? "club" : "", v);
         if (j === 1) {
           const b = el("button", "link", v);
-          b.addEventListener("click", () => openClub(r.id));
+          b.addEventListener("click", () => openClub(r[0]));
           td.replaceChildren(b);
         }
         tr.append(td);
@@ -88,71 +108,118 @@ function renderTable() {
       return tr;
     }),
   );
+  const legend = $("table-legend");
+  legend.replaceChildren();
+  if (ui.div === 0) {
+    legend.append(el("span", "swatch champ"), " 優勝 ", el("span", "swatch down"), " 降格（2 部へ）");
+  } else {
+    legend.append(el("span", "swatch champ"), " 昇格 ", el("span", "swatch po"), " プレーオフ（★ が勝って昇格）");
+  }
+  legend.append(el("br"), `${rec.year} 年の${L().divisions[ui.div].name}。クラブ名を押すと選手が見られます`);
+  $("playoff").replaceChildren(ui.div === 1 ? playoffCard(rec) : "");
+}
+
+/** @param {YearRecord} rec */
+function playoffCard(rec) {
+  const p = rec.playoff;
+  const card = el("div", "card");
+  card.append(el("h2", "", "昇格プレーオフ"));
+  /** @param {import("../engine/league.js").Score} s */
+  const score = (s) => `${clubShort(s.home)} ${s.homeGoals} - ${s.awayGoals} ${clubShort(s.away)}`;
+  for (const semi of p.semis) {
+    card.append(el("p", "sub", `準決勝 ${score(semi.first)} / ${score(semi.second)} → ${clubShort(semi.winner)}`));
+  }
+  card.append(el("p", "", `決勝 ${score(p.final)}${p.penalties ? "（PK）" : ""} → ${clubName(p.winner)} が昇格`));
+  return card;
 }
 
 function renderLeaders() {
-  const season = /** @type {SeasonResult} */ (view.season);
-  /** @param {string} title @param {"goals" | "assists"} key @param {string} unit */
-  const list = (title, key, unit) => {
+  const rec = lastRecord();
+  if (!rec) {
+    $("tab-leaders").replaceChildren(empty("まだシーズンを回していません。"));
+    return;
+  }
+  /** @param {string} title @param {import("../engine/league.js").LeaderRow[]} rows @param {string} unit */
+  const list = (title, rows, unit) => {
     const box = el("div", "card");
     box.append(el("h2", "", title));
     const ol = el("ol", "ranking");
-    for (const [id, s] of leaders(season, key, 10)) {
+    for (const [name, club, n] of rows) {
       const li = el("li");
-      const who = el("button", "link", playerOf(id).name);
-      who.addEventListener("click", () => openClub(s.club));
-      li.append(who, el("span", "sub", clubOf(s.club)?.short ?? ""), el("span", "num", `${s[key]}${unit}`));
+      li.append(el("span", "", name), el("span", "sub", clubShort(club)), el("span", "num", `${n}${unit}`));
       ol.append(li);
     }
     box.append(ol);
     return box;
   };
-  const injured = el("div", "card");
-  injured.append(el("h2", "", "長く休んだ選手"));
-  const ol = el("ol", "ranking");
-  [...season.stats.entries()]
-    .filter(([, s]) => s.weeksOut > 0)
-    .sort((a, b) => b[1].weeksOut - a[1].weeksOut)
-    .slice(0, 5)
-    .forEach(([id, s]) => {
-      const li = el("li");
-      li.append(el("span", "", playerOf(id).name), el("span", "sub", clubOf(s.club)?.short ?? ""), el("span", "num", `${s.weeksOut} 節`));
-      ol.append(li);
-    });
-  injured.append(ol);
-  $("tab-leaders").replaceChildren(list("得点ランキング", "goals", " 点"), list("アシストランキング", "assists", ""), injured);
+  const { goals, assists } = rec.leaders[ui.div];
+  $("tab-leaders").replaceChildren(
+    el("p", "status", `${rec.year} 年の${L().divisions[ui.div].name}`),
+    list("得点ランキング", goals, " 点"),
+    list("アシストランキング", assists, ""),
+  );
+}
+
+function renderClubSelect() {
+  const select = /** @type {HTMLSelectElement} */ ($("club-select"));
+  select.replaceChildren(
+    ...L().divisions.map((d) => {
+      const g = /** @type {HTMLOptGroupElement} */ (el("optgroup"));
+      g.label = d.name;
+      for (const id of d.clubIds) {
+        const o = /** @type {HTMLOptionElement} */ (el("option", "", clubName(id)));
+        o.value = id;
+        g.append(o);
+      }
+      return g;
+    }),
+  );
+  if (!L().clubs[ui.clubId]) ui.clubId = L().divisions[0].clubIds[0];
+  select.value = ui.clubId;
 }
 
 function renderClub() {
-  const season = /** @type {SeasonResult} */ (view.season);
-  const club = clubOf(view.clubId);
+  const club = L().clubs[ui.clubId];
   if (!club) return;
-  const pos = season.standings.findIndex((r) => r.id === club.id) + 1;
-  const m = club.manager;
+  const div = L().divisions.findIndex((d) => d.clubIds.includes(club.id));
+  const rec = lastRecord();
   const info = el("div", "card");
+  info.append(el("h2", "", club.name));
+  info.append(el("p", "sub", `${L().year} 年は${L().divisions[div].name}・クラブの規模 ${grade(club.level)} ${club.level.toFixed(0)}`));
+  if (rec) {
+    const d = rec.tables.findIndex((t) => t.some((r) => r[0] === club.id));
+    const pos = rec.tables[d].findIndex((r) => r[0] === club.id) + 1;
+    info.append(el("p", "sub", `${rec.year} 年: ${L().divisions[d].name} ${pos} 位・勝ち点 ${rowPoints(rec.tables[d][pos - 1])}`));
+  }
+  const m = club.manager;
   info.append(
-    el("h2", "", club.name),
-    el("p", "sub", `${pos} 位・勝ち点 ${points(season.standings[pos - 1])}`),
     el("p", "", `監督 ${m.name}（${m.age} 歳）`),
     el("p", "sub", `型 ${STYLES[m.style].label}（${STYLES[m.style].formation}）・采配 ${grade(m.ability)}`),
   );
   $("club-info").replaceChildren(info);
 
   const order = { GK: 0, DF: 1, MF: 2, FW: 3 };
-  const players = club.playerIds.map(playerOf).sort((a, b) => order[a.pos] - order[b.pos] || overall(b) - overall(a));
+  const players = club.playerIds.map((id) => L().players[id]).sort((a, b) => order[a.pos] - order[b.pos] || overall(b) - overall(a));
   const tbody = /** @type {HTMLTableSectionElement} */ ($("squad").querySelector("tbody"));
   tbody.replaceChildren(
     ...players.flatMap((p) => {
-      const s = /** @type {import("../engine/season.js").PlayerSeason} */ (season.stats.get(p.id));
+      const last = p.last;
       const tr = el("tr", "player");
       const ov = overall(p);
-      const nameCell = el("td", "club", `${p.name}${s.injuries > 0 ? " ✚" : ""}`);
-      tr.append(el("td", `pos pos-${p.pos}`, p.pos), nameCell, el("td", "", p.age), el("td", "", `${grade(ov)} ${ov}`), el("td", "", s.apps), el("td", "", s.goals), el("td", "", s.assists));
+      tr.append(
+        el("td", `pos pos-${p.pos}`, p.pos),
+        el("td", "club", `${p.name}${last && last.injuries > 0 ? " ✚" : ""}`),
+        el("td", "", p.age),
+        el("td", "", `${grade(ov)} ${ov}`),
+        el("td", "", last ? last.apps : "-"),
+        el("td", "", last ? last.goals : "-"),
+        el("td", "", p.career?.goals ?? 0),
+      );
       const detail = el("tr", "detail");
       detail.hidden = true;
       const td = el("td");
       td.setAttribute("colspan", "7");
-      td.append(playerDetail(p, s));
+      td.append(playerDetail(p));
       detail.append(td);
       tr.addEventListener("click", () => {
         detail.hidden = !detail.hidden;
@@ -162,10 +229,8 @@ function renderClub() {
   );
 }
 
-/**
- * @param {Player} p @param {import("../engine/season.js").PlayerSeason} s
- */
-function playerDetail(p, s) {
+/** @param {Player} p */
+function playerDetail(p) {
   const box = el("div", "attrs");
   const grid = el("dl", "attr-grid");
   for (const a of ATTRS) {
@@ -176,24 +241,32 @@ function playerDetail(p, s) {
   box.append(grid);
   const traits = p.traits.map((t) => TRAITS[t].label).join("・");
   box.append(el("p", "sub", traits ? `特徴: ${traits}` : "特徴: なし"));
-  if (s.injuries > 0) box.append(el("p", "sub", `けが ${s.injuries} 回・休んだ節 ${s.weeksOut}`));
+  const c = p.career;
+  if (c && c.seasons > 0) box.append(el("p", "sub", `通算 ${c.seasons} シーズン・${c.apps} 試合・${c.goals} 点・${c.assists} アシスト`));
+  if (p.last && p.last.injuries > 0) box.append(el("p", "sub", `前のシーズンのけが ${p.last.injuries} 回`));
   return box;
 }
 
 function renderRounds() {
-  const season = /** @type {SeasonResult} */ (view.season);
-  const name = (/** @type {string} */ id) => clubOf(id)?.short ?? id;
-  $("round-list").replaceChildren(
+  const list = $("round-list");
+  const season = ui.seasons?.[ui.div];
+  if (!season) {
+    list.replaceChildren(empty("試合の結果は、このページで進めた直後のシーズンだけ見られます（セーブには入れていません）。"));
+    return;
+  }
+  const players = L().players;
+  list.replaceChildren(
     ...season.rounds.map((round, i) => {
       const d = /** @type {HTMLDetailsElement} */ (el("details", "round"));
       d.append(el("summary", "", `第 ${i + 1} 節`));
       for (const m of round) {
         const row = el("div", "match");
-        row.append(el("span", "home", name(m.home)), el("span", "score", `${m.homeGoals} - ${m.awayGoals}`), el("span", "away", name(m.away)));
+        row.append(el("span", "home", clubShort(m.home)), el("span", "score", `${m.homeGoals} - ${m.awayGoals}`), el("span", "away", clubShort(m.away)));
         d.append(row);
         if (m.goals.length) {
-          const who = m.goals.map((g) => playerOf(g.scorer).name.split("・").pop()).join("、");
-          d.append(el("p", "scorers", who));
+          // 引退した選手は名前が残っていないので出さない
+          const who = m.goals.map((g) => players[g.scorer]?.name.split("・").pop() ?? "").filter(Boolean).join("、");
+          if (who) d.append(el("p", "scorers", who));
         }
       }
       return d;
@@ -201,49 +274,173 @@ function renderRounds() {
   );
 }
 
-/** @param {World} world @param {SeasonResult} season */
-function render(world, season) {
-  view.world = world;
-  view.season = season;
-  if (!view.clubId) view.clubId = world.clubs[0].id;
-  /** @type {HTMLSelectElement} */ ($("club-select")).replaceChildren(
-    ...world.clubs.map((c) => {
-      const o = /** @type {HTMLOptionElement} */ (el("option", "", c.name));
-      o.value = c.id;
-      return o;
-    }),
-  );
-  /** @type {HTMLSelectElement} */ ($("club-select")).value = view.clubId;
+function renderHistory() {
+  const history = L().history;
+  if (history.length === 0) {
+    $("tab-history").replaceChildren(empty("まだシーズンを回していません。"));
+    return;
+  }
+  /** @type {Map<string, number>} */
+  const titles = new Map();
+  for (const h of history) titles.set(h.tables[0][0][0], (titles.get(h.tables[0][0][0]) ?? 0) + 1);
+  const summary = el("div", "card");
+  summary.append(el("h2", "", `1 部の優勝回数（${history.length} 年）`));
+  const ol = el("ol", "ranking");
+  for (const [id, n] of [...titles.entries()].sort((a, b) => b[1] - a[1])) {
+    const li = el("li");
+    const b = el("button", "link", clubName(id));
+    b.addEventListener("click", () => openClub(id));
+    li.append(b, el("span", "num", `${n} 回`));
+    ol.append(li);
+  }
+  summary.append(ol);
+
+  const years = [...history].reverse().map((h) => {
+    const card = el("div", "card year");
+    const champ = h.tables[0][0];
+    card.append(el("h2", "", `${h.year} 年`));
+    card.append(el("p", "", `優勝 ${clubName(champ[0])}（勝ち点 ${rowPoints(champ)}）`));
+    card.append(el("p", "sub", `2 部優勝 ${clubShort(h.tables[1][0][0])}`));
+    card.append(el("p", "sub", `昇格 ${h.promoted.map(clubShort).join("・")}（PO）`));
+    card.append(el("p", "sub", `降格 ${h.relegated.map(clubShort).join("・")}`));
+    const top = h.leaders[0].goals[0];
+    if (top) card.append(el("p", "sub", `得点王 ${top[0]}（${clubShort(top[1])}）${top[2]} 点`));
+    if (h.offseason.takeovers.length) card.append(el("p", "sub", `新しいオーナー: ${h.offseason.takeovers.map(clubShort).join("・")}`));
+    return card;
+  });
+  $("tab-history").replaceChildren(summary, ...years);
+}
+
+function renderStatus() {
+  const rec = lastRecord();
+  let text = `${L().year} 年のシーズン前（種 ${L().seed}）。`;
+  if (rec) {
+    text += ` ${rec.year} 年は ${clubName(rec.tables[0][0][0])} が優勝。昇格 ${rec.promoted.map(clubShort).join("・")}、降格 ${rec.relegated.map(clubShort).join("・")}。`;
+  }
+  $("status").textContent = text;
+}
+
+function renderAll() {
+  renderStatus();
+  renderClubSelect();
   renderTable();
   renderLeaders();
   renderClub();
   renderRounds();
+  renderHistory();
   $("tabs").hidden = false;
   if ([...document.querySelectorAll(".panel")].every((p) => /** @type {HTMLElement} */ (p).hidden)) showTab("table");
-  const champion = clubOf(season.standings[0].id)?.name;
-  const [topId, top] = leaders(season, "goals", 1)[0] ?? [];
-  $("status").textContent =
-    `種 ${season.seed}。優勝は ${champion}（勝ち点 ${points(season.standings[0])}）。` +
-    (topId ? `得点王は ${playerOf(topId).name}（${top.goals} 点）。` : "");
+}
+
+/** @param {boolean} busy */
+function setBusy(busy) {
+  ui.busy = busy;
+  for (const id of ["next1", "next10", "export", "new"]) /** @type {HTMLButtonElement} */ ($(id)).disabled = busy;
+  /** @type {HTMLInputElement} */ ($("import")).disabled = busy;
+}
+
+async function save() {
+  try {
+    await storeSave(serialize(L()));
+  } catch (e) {
+    $("status").textContent += "（このブラウザにはセーブできませんでした。「書き出し」で控えを取ってください）";
+  }
+}
+
+/**
+ * @param {import("../engine/clubs.js").NameData} names @param {number} years
+ */
+async function advance(names, years) {
+  setBusy(true);
+  for (let i = 0; i < years; i++) {
+    $("status").textContent = `${L().year} 年を回しています…（${i + 1} / ${years}）`;
+    // 画面が固まらないよう、1 年ごとに描画の番を渡す
+    await new Promise((r) => setTimeout(r, 0));
+    const result = playYear(L(), names);
+    ui.league = result.league;
+    ui.seasons = result.seasons;
+  }
+  renderAll();
+  await save();
+  setBusy(false);
+}
+
+function exportSave() {
+  const blob = new Blob([serialize(L())], { type: "application/json" });
+  const a = /** @type {HTMLAnchorElement} */ (el("a"));
+  a.href = URL.createObjectURL(blob);
+  a.download = `league-sim-${L().year}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 async function main() {
-  const { clubs, names } = await loadData();
-  const seedInput = /** @type {HTMLInputElement} */ ($("seed"));
-  $("run").addEventListener("click", () => {
-    const seed = seedInput.value === "" ? randomSeed() : Number(seedInput.value) >>> 0;
-    const world = generateWorld(clubs, names, seed);
-    render(world, playSeason(world, seed));
-  });
+  const [clubJson, nameJson] = await Promise.all(
+    ["data/clubs.json", "data/names.json"].map((u) => fetch(u).then((r) => r.json())),
+  );
+  const clubData = parseClubData(clubJson);
+  const names = parseNameData(nameJson);
+
+  /** @type {string | undefined} */
+  let stored;
+  try {
+    stored = await loadStoredSave();
+  } catch {
+    stored = undefined;
+  }
+  let note = "";
+  if (stored) {
+    try {
+      ui.league = parseSave(stored);
+    } catch (e) {
+      note = `（前のセーブが読めなかったので新しく始めました: ${/** @type {Error} */ (e).message}）`;
+    }
+  }
+  if (!ui.league) {
+    ui.league = createLeague(clubData, names, randomSeed());
+    await save();
+  }
+  renderAll();
+  if (note) $("status").textContent += note;
+
+  $("next1").addEventListener("click", () => advance(names, 1));
+  $("next10").addEventListener("click", () => advance(names, 10));
   for (const b of document.querySelectorAll("#tabs button")) {
     b.addEventListener("click", () => showTab(/** @type {string} */ (/** @type {HTMLElement} */ (b).dataset.tab)));
   }
+  for (const b of document.querySelectorAll("#div-switch button")) {
+    b.addEventListener("click", () => setDiv(Number(/** @type {HTMLElement} */ (b).dataset.div)));
+  }
   $("club-select").addEventListener("change", (e) => {
-    view.clubId = /** @type {HTMLSelectElement} */ (e.target).value;
+    ui.clubId = /** @type {HTMLSelectElement} */ (e.target).value;
     renderClub();
   });
-  // データを読み終わるまでは押せないようにしてある
-  /** @type {HTMLButtonElement} */ ($("run")).disabled = false;
+  $("export").addEventListener("click", exportSave);
+  $("import").addEventListener("change", async (e) => {
+    const input = /** @type {HTMLInputElement} */ (e.target);
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    try {
+      ui.league = parseSave(await file.text());
+      ui.seasons = null;
+      renderAll();
+      await save();
+      $("status").textContent += "（読み込みました）";
+    } catch (err) {
+      alert(`読み込めませんでした: ${/** @type {Error} */ (err).message}`);
+    }
+  });
+  $("new").addEventListener("click", async () => {
+    if (!confirm("今のリーグを消して、新しく始めますか？（消す前に「書き出し」で控えを取れます）")) return;
+    const input = /** @type {HTMLInputElement} */ ($("seed"));
+    const seed = input.value === "" ? randomSeed() : Number(input.value) >>> 0;
+    ui.league = createLeague(clubData, names, seed);
+    ui.seasons = null;
+    renderAll();
+    await save();
+  });
+  setBusy(false);
 }
 
 main().catch((e) => {

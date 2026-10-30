@@ -60,6 +60,16 @@ export function injuryLength(rng) {
 }
 
 /**
+ * 監督が先発を選び、その試合での攻撃力と守備力を出す。
+ * @param {ClubState} club @param {Player[]} available けがをしていない選手
+ * @param {(p: Player) => number} conditionOf
+ */
+export function prepareSide(club, available, conditionOf) {
+  const lineup = pickLineup(available, conditionOf, STYLES[club.manager.style].formation);
+  return { id: club.id, lineup, side: teamStrength(lineup, conditionOf, club.manager) };
+}
+
+/**
  * 同じ world と seed なら必ず同じ結果になる。world は変えない。
  * @param {World} world @param {number} seed
  * @returns {SeasonResult}
@@ -79,11 +89,8 @@ export function playSeason(world, seed) {
   const byId = new Map(world.clubs.map((c) => [c.id, c]));
 
   /** @param {ClubState} club */
-  const prepare = (club) => {
-    const available = club.playerIds.filter((id) => st(id).out === 0).map(player);
-    const lineup = pickLineup(available, conditionOf, STYLES[club.manager.style].formation);
-    return { id: club.id, lineup, side: teamStrength(lineup, conditionOf, club.manager) };
-  };
+  const prepare = (club) =>
+    prepareSide(club, club.playerIds.filter((id) => st(id).out === 0).map(player), conditionOf);
 
   const table = createTable(world.clubs.map((c) => c.id));
   const rounds = makeSchedule(world.clubs.map((c) => c.id)).map((fixtures) => {

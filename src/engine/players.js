@@ -9,8 +9,10 @@ import { normal, pick } from "./rng.js";
  * @typedef {"sho" | "pas" | "dri" | "def" | "spd" | "sta" | "gk"} Attr
  * @typedef {Record<Attr, number>} Attrs
  * @typedef {keyof typeof TRAITS} Trait
+ * @typedef {{ seasons: number, apps: number, goals: number, assists: number }} Career  通算の記録
+ * @typedef {{ apps: number, goals: number, assists: number, injuries: number }} LastSeason  前のシーズンの記録
  * @typedef {{ id: string, name: string, pos: Position, age: number, attrs: Attrs,
- *             potential: number, traits: Trait[] }} Player
+ *             potential: number, traits: Trait[], career?: Career, last?: LastSeason }} Player
  *   potential は伸びきったときの総合力の目安（若い選手ほど今との差が大きい）
  */
 

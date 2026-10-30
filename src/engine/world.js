@@ -68,7 +68,7 @@ export function makePlayer(rng, id, name, pos, base, age) {
  * @param {Rng} rng @param {NameData} names @param {Set<string>} used @param {number} level
  * @returns {Manager}
  */
-function makeManager(rng, names, used, level) {
+export function makeManager(rng, names, used, level) {
   const styles = /** @type {Style[]} */ (Object.keys(STYLES));
   return {
     name: makeName(rng, names, used),

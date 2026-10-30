@@ -11,23 +11,27 @@
 </head>
 <body>
   <header>
-    <h1>リーグ運営シム <small>段階 2</small></h1>
+    <h1>リーグ運営シム <small>段階 3</small></h1>
   </header>
   <main>
     <section class="controls">
-      <label>乱数の種
-        <input id="seed" type="number" inputmode="numeric" placeholder="空ならおまかせ">
-      </label>
-      <button id="run" type="button" disabled>1 シーズンを回す</button>
+      <button id="next1" type="button" disabled>1 年進める</button>
+      <button id="next10" type="button" class="secondary" disabled>10 年進める</button>
     </section>
-    <p id="status" class="status">ボタンを押すと、選手と監督を作って 38 節を回します。</p>
+    <p id="status" class="status">読み込み中…</p>
 
     <nav id="tabs" class="tabs" role="tablist" hidden>
       <button type="button" role="tab" data-tab="table" aria-selected="true">順位</button>
-      <button type="button" role="tab" data-tab="leaders" aria-selected="false">個人成績</button>
+      <button type="button" role="tab" data-tab="leaders" aria-selected="false">個人</button>
       <button type="button" role="tab" data-tab="club" aria-selected="false">クラブ</button>
       <button type="button" role="tab" data-tab="rounds" aria-selected="false">試合</button>
+      <button type="button" role="tab" data-tab="history" aria-selected="false">歴代</button>
     </nav>
+
+    <div id="div-switch" class="seg" hidden>
+      <button type="button" data-div="0" aria-pressed="true">1 部</button>
+      <button type="button" data-div="1" aria-pressed="false">2 部</button>
+    </div>
 
     <section id="tab-table" class="panel" hidden>
       <table id="table">
@@ -36,7 +40,8 @@
         </thead>
         <tbody></tbody>
       </table>
-      <p class="legend"><span class="swatch champ"></span>優勝 <span class="swatch down"></span>降格圏　クラブ名を押すと選手が見られます</p>
+      <p id="table-legend" class="legend"></p>
+      <div id="playoff"></div>
     </section>
 
     <section id="tab-leaders" class="panel" hidden></section>
@@ -46,16 +51,31 @@
       <div id="club-info"></div>
       <table id="squad" class="squad">
         <thead>
-          <tr><th>位</th><th class="club">選手</th><th>齢</th><th>総合</th><th>試</th><th>得</th><th>ア</th></tr>
+          <tr><th>位</th><th class="club">選手</th><th>齢</th><th>総合</th><th>試</th><th>得</th><th>通算</th></tr>
         </thead>
         <tbody></tbody>
       </table>
-      <p class="legend">選手を押すと能力が見られます。✚ はシーズン中にけがをした選手</p>
+      <p class="legend">試・得は前のシーズン、通算は通算の得点。選手を押すと能力が見られます。✚ は前のシーズンにけがをした選手</p>
     </section>
 
     <section id="tab-rounds" class="panel" hidden>
       <div id="round-list"></div>
     </section>
+
+    <section id="tab-history" class="panel" hidden></section>
+
+    <details class="card save">
+      <summary>セーブ・新しく始める</summary>
+      <p class="sub">1 年進めるたびに、このブラウザの中に自動でセーブします。別の端末に移すときや、念のための控えには「書き出し」を使ってください。</p>
+      <div class="row">
+        <button id="export" type="button" class="secondary">書き出し</button>
+        <label class="file-button secondary">読み込み<input id="import" type="file" accept="application/json,.json"></label>
+      </div>
+      <div class="row">
+        <label class="grow">乱数の種 <input id="seed" type="number" inputmode="numeric" placeholder="空ならおまかせ"></label>
+        <button id="new" type="button" class="danger">新しく始める</button>
+      </div>
+    </details>
   </main>
   <script type="module" src="src/ui/app.js"></script>
 </body>

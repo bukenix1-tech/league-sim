@@ -10,6 +10,9 @@ import { makeSchedule } from "../src/engine/schedule.js";
 import { fatigueLoss, injuryChance, playSeason } from "../src/engine/season.js";
 import { addResult, createTable, goalDiff, points, standings } from "../src/engine/table.js";
 import { generateWorld, makePlayer, SQUAD_SHAPE } from "../src/engine/world.js";
+import { createLeague, playYear, RELEGATED, SAVE_VERSION } from "../src/engine/league.js";
+import { retireChance } from "../src/engine/offseason.js";
+import { parseSave, serialize } from "../src/engine/save.js";
 
 /** @param {unknown} cond @param {string} msg */
 function ok(cond, msg) {
@@ -34,8 +37,15 @@ const full = () => 100;
  * @returns {{ name: string, fn: () => void }[]}
  */
 export function makeCases(clubJson, nameJson) {
-  const clubs = parseClubData(clubJson).divisions[0].clubs;
+  const clubData = parseClubData(clubJson);
+  const clubs = clubData.divisions[0].clubs;
   const names = parseNameData(nameJson);
+  // 3 年回したリーグ（何年も続ける試験で使う）
+  const start = createLeague(clubData, names, 5);
+  const years = [playYear(start, names)];
+  years.push(playYear(years[0].league, names));
+  years.push(playYear(years[1].league, names));
+  const after = years[2].league;
   const rounds = makeSchedule(IDS);
   const world = generateWorld(clubs, names, 99);
   const season = playSeason(world, 7);
@@ -286,6 +296,100 @@ export function makeCases(clubJson, nameJson) {
         const before = JSON.stringify(p);
         agePlayer(p, createRng(1));
         eq(JSON.stringify(p), before);
+      },
+    },
+    {
+      name: "何年も: 1 部 20・2 部 24 のまま、全部で 44 クラブ",
+      fn() {
+        eq(after.divisions.map((d) => d.clubIds.length), [20, 24]);
+        eq(new Set(after.divisions.flatMap((d) => d.clubIds)).size, 44);
+      },
+    },
+    {
+      name: "何年も: 1 部の下 3 つが降格、2 部の上 2 つとプレーオフの勝者が昇格",
+      fn() {
+        const { record, league } = years[0];
+        const [top, second] = record.tables;
+        eq(record.relegated, top.slice(-RELEGATED).map((r) => r[0]));
+        eq(record.promoted.slice(0, 2), second.slice(0, 2).map((r) => r[0]));
+        ok(second.slice(2, 6).map((r) => r[0]).includes(record.playoff.winner), "プレーオフの勝者が 3〜6 位でない");
+        for (const id of record.promoted) ok(league.divisions[0].clubIds.includes(id), `${id} が 1 部にいない`);
+        for (const id of record.relegated) ok(league.divisions[1].clubIds.includes(id), `${id} が 2 部にいない`);
+      },
+    },
+    {
+      name: "何年も: 2 部は 46 節、1 部は 38 節",
+      fn() {
+        const [top, second] = years[0].seasons;
+        eq([top.rounds.length, second.rounds.length], [38, 46]);
+      },
+    },
+    {
+      name: "何年も: どのクラブも毎年 22 人そろい、同じ選手が 2 つのクラブにいない",
+      fn() {
+        for (const { league } of years) {
+          const ids = Object.values(league.clubs).flatMap((c) => c.playerIds);
+          eq(ids.length, 44 * 22);
+          eq(new Set(ids).size, ids.length);
+          eq(Object.keys(league.players).length, ids.length, "選手の表とクラブの選手が合わない");
+          for (const c of Object.values(league.clubs)) {
+            const counts = { GK: 0, DF: 0, MF: 0, FW: 0 };
+            for (const id of c.playerIds) counts[league.players[id].pos]++;
+            eq(counts, SQUAD_SHAPE, c.name);
+          }
+        }
+      },
+    },
+    {
+      name: "何年も: 年を取り、引退と新しい選手の入れ替わりがある",
+      fn() {
+        const p0 = Object.values(start.players)[0];
+        const p1 = years[0].league.players[p0.id];
+        if (p1) eq(p1.age, p0.age + 1);
+        const o = years[0].record.offseason;
+        ok(o.retired + o.released > 0, "入れ替わりが無い");
+        eq(o.joined, o.retired + o.released);
+        eq(retireChance(30), 0);
+        eq(retireChance(40), 1);
+      },
+    },
+    {
+      name: "何年も: 通算の記録が積み重なり、年と記録が 1 つずつ進む",
+      fn() {
+        eq(after.year, start.year + 3);
+        eq(after.history.map((h) => h.year), [start.year, start.year + 1, start.year + 2]);
+        const veteran = Object.values(after.players).find((p) => (p.career?.seasons ?? 0) === 3);
+        ok(veteran, "3 シーズン続けて出た選手がいない");
+      },
+    },
+    {
+      name: "何年も: 同じ種なら同じ流れになり、元のリーグは変わらない",
+      fn() {
+        const before = serialize(start);
+        const again = playYear(start, names);
+        eq(serialize(again.league), serialize(years[0].league));
+        eq(serialize(start), before);
+      },
+    },
+    {
+      name: "セーブ: 書き出して読み込むと元どおり",
+      fn() {
+        const text = serialize(after);
+        eq(serialize(parseSave(text)), text);
+        // 読み込んだものから続けても同じ結果
+        eq(serialize(playYear(parseSave(text), names).league), serialize(playYear(after, names).league));
+      },
+    },
+    {
+      name: "セーブ: 新しすぎる版や壊れたファイルは読まない",
+      fn() {
+        const bad = (/** @type {string} */ text) => {
+          try { parseSave(text); } catch { return true; }
+          return false;
+        };
+        ok(bad(JSON.stringify({ ...after, version: SAVE_VERSION + 1 })), "新しい版を読んだ");
+        ok(bad("{これは JSON ではない"), "壊れたファイルを読んだ");
+        ok(bad(JSON.stringify({ version: SAVE_VERSION })), "中身の無いセーブを読んだ");
       },
     },
   ];
