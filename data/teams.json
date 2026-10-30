@@ -1,0 +1,25 @@
+{
+  "_note": "仮のデータ。attack は高いほど点を取りやすく、defense は高いほど点を取られにくい。1.0 がリーグの平均。",
+  "teams": [
+    {"name": "Northbridge City",    "attack": 1.65, "defense": 1.55},
+    {"name": "Redhaven United",     "attack": 1.55, "defense": 1.45},
+    {"name": "Kingsport Rovers",    "attack": 1.40, "defense": 1.30},
+    {"name": "Westmoor Athletic",   "attack": 1.35, "defense": 1.20},
+    {"name": "Ashford Town",        "attack": 1.20, "defense": 1.15},
+    {"name": "Bramley Albion",      "attack": 1.15, "defense": 1.10},
+    {"name": "Castleton Wanderers", "attack": 1.05, "defense": 1.05},
+    {"name": "Dunmore Forest",      "attack": 1.00, "defense": 1.05},
+    {"name": "Eastvale Rangers",    "attack": 1.00, "defense": 0.95},
+    {"name": "Fairhill Villa",      "attack": 0.95, "defense": 1.00},
+    {"name": "Glenbrook County",    "attack": 0.95, "defense": 0.95},
+    {"name": "Harrowgate FC",       "attack": 0.90, "defense": 0.95},
+    {"name": "Ironbridge Palace",   "attack": 0.90, "defense": 0.90},
+    {"name": "Larkfield Orient",    "attack": 0.85, "defense": 0.90},
+    {"name": "Millbrook Wednesday", "attack": 0.85, "defense": 0.85},
+    {"name": "Oakham Borough",      "attack": 0.80, "defense": 0.85},
+    {"name": "Pennington Argyle",   "attack": 0.80, "defense": 0.80},
+    {"name": "Queensbury Athletic", "attack": 0.75, "defense": 0.80},
+    {"name": "Ravenscar Town",      "attack": 0.75, "defense": 0.75},
+    {"name": "Stoneleigh United",   "attack": 0.70, "defense": 0.75}
+  ]
+}
