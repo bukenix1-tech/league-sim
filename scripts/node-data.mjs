@@ -1,6 +1,7 @@
-// Node で data/clubs.json を読む。
+// Node で data/ の JSON を読む。
 import { readFileSync } from "node:fs";
 
-export function readClubJson() {
-  return JSON.parse(readFileSync(new URL("../data/clubs.json", import.meta.url), "utf8"));
-}
+const read = (name) => JSON.parse(readFileSync(new URL(`../data/${name}`, import.meta.url), "utf8"));
+
+export const readClubJson = () => read("clubs.json");
+export const readNameJson = () => read("names.json");

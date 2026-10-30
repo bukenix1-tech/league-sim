@@ -26,3 +26,44 @@ export function createRng(seed) {
 export function randomSeed() {
   return Math.floor(Math.random() * 1_000_000);
 }
+
+/**
+ * min 以上 max 以下の整数
+ * @param {Rng} rng @param {number} min @param {number} max
+ */
+export function randInt(rng, min, max) {
+  return min + Math.floor(rng.next() * (max - min + 1));
+}
+
+/**
+ * 正規分布（Box-Muller）
+ * @param {Rng} rng @param {number} mean @param {number} sd
+ */
+export function normal(rng, mean, sd) {
+  const u = 1 - rng.next();
+  const v = rng.next();
+  return mean + sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+/**
+ * @template T
+ * @param {Rng} rng @param {T[]} items
+ * @returns {T}
+ */
+export function pick(rng, items) {
+  return items[Math.floor(rng.next() * items.length)];
+}
+
+/**
+ * 重みに比例して添え字を 1 つ選ぶ
+ * @param {Rng} rng @param {number[]} weights
+ */
+export function weightedIndex(rng, weights) {
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = rng.next() * total;
+  for (let i = 0; i < weights.length; i++) {
+    r -= weights[i];
+    if (r < 0) return i;
+  }
+  return weights.length - 1;
+}

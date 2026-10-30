@@ -1,31 +1,31 @@
 {
-  "version": 1,
-  "_note": "仮のデータ。名前は架空。attack は高いほど点を取りやすく、defense は高いほど点を取られにくい。1.0 がリーグの平均。段階 3 で 2 部 (div2) を足す。",
+  "version": 2,
+  "_note": "仮のデータ。名前は架空。level はクラブの選手のおおよその強さ（主力の能力の目安、1〜99）。選手はこの level をもとに作られる。段階 3 で 2 部 (div2) を足す。",
   "divisions": [
     {
       "id": "div1",
       "name": "1 部",
       "clubs": [
-        {"id": "nbc", "name": "ノースブリッジ・シティ",     "short": "Nブリッジ", "attack": 1.65, "defense": 1.55},
-        {"id": "rhu", "name": "レッドヘイブン・ユナイテッド", "short": "Rヘイブン", "attack": 1.55, "defense": 1.45},
-        {"id": "kpr", "name": "キングスポート・ローヴァーズ", "short": "Kポート",   "attack": 1.40, "defense": 1.30},
-        {"id": "wma", "name": "ウェストムーア・アスレティック", "short": "Wムーア",  "attack": 1.35, "defense": 1.20},
-        {"id": "asf", "name": "アシュフォード・タウン",       "short": "アシュフォード", "attack": 1.20, "defense": 1.15},
-        {"id": "bra", "name": "ブラムリー・アルビオン",       "short": "ブラムリー", "attack": 1.15, "defense": 1.10},
-        {"id": "caw", "name": "キャッスルトン・ワンダラーズ", "short": "キャッスルトン", "attack": 1.05, "defense": 1.05},
-        {"id": "dmf", "name": "ダンモア・フォレスト",         "short": "ダンモア",   "attack": 1.00, "defense": 1.05},
-        {"id": "evr", "name": "イーストベール・レンジャーズ", "short": "イーストベール", "attack": 1.00, "defense": 0.95},
-        {"id": "fhv", "name": "フェアヒル・ヴィラ",           "short": "フェアヒル", "attack": 0.95, "defense": 1.00},
-        {"id": "gbc", "name": "グレンブルック・カウンティ",   "short": "グレンブルック", "attack": 0.95, "defense": 0.95},
-        {"id": "hgf", "name": "ハロウゲートFC",              "short": "ハロウゲート", "attack": 0.90, "defense": 0.95},
-        {"id": "ibp", "name": "アイアンブリッジ・パレス",     "short": "Iブリッジ", "attack": 0.90, "defense": 0.90},
-        {"id": "lko", "name": "ラークフィールド・オリエント", "short": "ラークフィールド", "attack": 0.85, "defense": 0.90},
-        {"id": "mbw", "name": "ミルブルック・ウェンズデイ",   "short": "ミルブルック", "attack": 0.85, "defense": 0.85},
-        {"id": "oab", "name": "オーカム・バラ",               "short": "オーカム",   "attack": 0.80, "defense": 0.85},
-        {"id": "pna", "name": "ペニントン・アーガイル",       "short": "ペニントン", "attack": 0.80, "defense": 0.80},
-        {"id": "qba", "name": "クイーンズベリー・アスレティック", "short": "クイーンズベリー", "attack": 0.75, "defense": 0.80},
-        {"id": "rvt", "name": "レイヴンスカー・タウン",       "short": "レイヴンスカー", "attack": 0.75, "defense": 0.75},
-        {"id": "slu", "name": "ストーンリー・ユナイテッド",   "short": "ストーンリー", "attack": 0.70, "defense": 0.75}
+        {"id": "nbc", "name": "ノースブリッジ・シティ",       "short": "Nブリッジ",       "level": 80},
+        {"id": "rhu", "name": "レッドヘイブン・ユナイテッド", "short": "Rヘイブン",       "level": 78},
+        {"id": "kpr", "name": "キングスポート・ローヴァーズ", "short": "Kポート",         "level": 75},
+        {"id": "wma", "name": "ウェストムーア・アスレティック", "short": "Wムーア",       "level": 74},
+        {"id": "asf", "name": "アシュフォード・タウン",       "short": "アシュフォード",  "level": 71},
+        {"id": "bra", "name": "ブラムリー・アルビオン",       "short": "ブラムリー",      "level": 70},
+        {"id": "caw", "name": "キャッスルトン・ワンダラーズ", "short": "キャッスルトン",  "level": 67},
+        {"id": "dmf", "name": "ダンモア・フォレスト",         "short": "ダンモア",        "level": 66},
+        {"id": "evr", "name": "イーストベール・レンジャーズ", "short": "イーストベール",  "level": 65},
+        {"id": "fhv", "name": "フェアヒル・ヴィラ",           "short": "フェアヒル",      "level": 64},
+        {"id": "gbc", "name": "グレンブルック・カウンティ",   "short": "グレンブルック",  "level": 63},
+        {"id": "hgf", "name": "ハロウゲートFC",              "short": "ハロウゲート",    "level": 62},
+        {"id": "ibp", "name": "アイアンブリッジ・パレス",     "short": "Iブリッジ",       "level": 61},
+        {"id": "lko", "name": "ラークフィールド・オリエント", "short": "ラークフィールド", "level": 60},
+        {"id": "mbw", "name": "ミルブルック・ウェンズデイ",   "short": "ミルブルック",    "level": 59},
+        {"id": "oab", "name": "オーカム・バラ",               "short": "オーカム",        "level": 58},
+        {"id": "pna", "name": "ペニントン・アーガイル",       "short": "ペニントン",      "level": 57},
+        {"id": "qba", "name": "クイーンズベリー・アスレティック", "short": "クイーンズベリー", "level": 56},
+        {"id": "rvt", "name": "レイヴンスカー・タウン",       "short": "レイヴンスカー",  "level": 55},
+        {"id": "slu", "name": "ストーンリー・ユナイテッド",   "short": "ストーンリー",    "level": 54}
       ]
     }
   ]

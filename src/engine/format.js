@@ -18,14 +18,20 @@ const pct = (/** @type {number} */ x) => `${(x * 100).toFixed(1)}%`;
  */
 export function formatSummary(s, clubs, seed) {
   const name = new Map(clubs.map((c) => [c.id, c.name]));
+  const row = (/** @type {string} */ label, /** @type {string} */ value, /** @type {string} */ target, extra = "") =>
+    `${label.padEnd(12, "　")} ${value.padStart(6)}   ${target}${extra}`;
   const lines = [
     `${s.runs} シーズン (種 = ${seed})`,
     "",
-    "                     結果     本物の目安",
-    `優勝クラブの勝ち点   ${s.championPointsAvg.toFixed(1).padStart(6)}     ${REAL_TARGETS.championPoints} (最小 ${s.championPointsMin}, 最大 ${s.championPointsMax})`,
-    `1 試合の平均得点     ${s.goalsPerMatch.toFixed(2).padStart(6)}     ${REAL_TARGETS.goalsPerMatch}`,
-    `引き分けの割合       ${pct(s.drawRate).padStart(6)}     ${REAL_TARGETS.drawRate}`,
-    `ホームの勝ちの割合   ${pct(s.homeWinRate).padStart(6)}     ${REAL_TARGETS.homeWinRate}`,
+    `${"".padEnd(12, "　")}   結果   本物の目安`,
+    row("優勝クラブの勝ち点", s.championPointsAvg.toFixed(1), REAL_TARGETS.championPoints, ` (最小 ${s.championPointsMin}, 最大 ${s.championPointsMax})`),
+    row("1 試合の平均得点", s.goalsPerMatch.toFixed(2), REAL_TARGETS.goalsPerMatch),
+    row("引き分けの割合", pct(s.drawRate), REAL_TARGETS.drawRate),
+    row("ホームの勝ちの割合", pct(s.homeWinRate), REAL_TARGETS.homeWinRate),
+    row("得点王の得点", s.topScorerAvg.toFixed(1), REAL_TARGETS.topScorer, ` (最小 ${s.topScorerMin}, 最大 ${s.topScorerMax})`),
+    row("アシスト王", s.topAssistsAvg.toFixed(1), REAL_TARGETS.topAssists),
+    row("1 クラブのけが人", s.injuriesPerClub.toFixed(1), REAL_TARGETS.injuriesPerClub),
+    row("1 クラブで先発した人数", s.playersUsedPerClub.toFixed(1), "(22 人のうち)"),
     "",
     "優勝した回数",
     ...s.champions.map(([id, n]) => `  ${String(n).padStart(5)} (${pct(n / s.runs)})  ${name.get(id)}`),
@@ -34,6 +40,17 @@ export function formatSummary(s, clubs, seed) {
     ...s.relegated.slice(0, 5).map(([id, n]) => `  ${String(n).padStart(5)} (${pct(n / s.runs)})  ${name.get(id)}`),
   ];
   return lines.join("\n");
+}
+
+/**
+ * @param {{ age: number, avg: number }[]} curve
+ */
+export function formatAgingCurve(curve) {
+  const peak = Math.max(...curve.map((c) => c.avg));
+  return [
+    "年齢ごとの総合力の平均 (18 歳で作った選手を毎年育てた場合)",
+    ...curve.map((c) => `  ${c.age} 歳  ${c.avg.toFixed(1).padStart(5)}  ${"■".repeat(Math.max(0, Math.round((c.avg - peak + 30) / 1.5)))}`),
+  ].join("\n");
 }
 
 /**

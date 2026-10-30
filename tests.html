@@ -15,8 +15,8 @@
   </main>
   <script type="module">
     import { makeCases, runCases } from "./tests/cases.js";
-    const clubJson = await (await fetch("data/clubs.json")).json();
-    const results = runCases(makeCases(clubJson));
+    const [clubJson, nameJson] = await Promise.all(["data/clubs.json", "data/names.json"].map((u) => fetch(u).then((r) => r.json())));
+    const results = runCases(makeCases(clubJson, nameJson));
     const failed = results.filter((r) => r.error);
     document.getElementById("list").replaceChildren(...results.map((r) => {
       const li = document.createElement("li");

@@ -8,6 +8,10 @@
   --accent-fg: #ffffff;
   --champ: #dcfce7;
   --down: #fee2e2;
+  --tab-bg: #e7ebe6;
+  --g-high: #15803d;
+  --g-mid: #a16207;
+  --g-low: #b91c1c;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -20,6 +24,10 @@
     --accent-fg: #052e16;
     --champ: #14361f;
     --down: #3d1a1a;
+    --tab-bg: #222722;
+    --g-high: #4ade80;
+    --g-mid: #facc15;
+    --g-low: #f87171;
   }
 }
 
@@ -35,14 +43,18 @@ header, main {
   margin: 0 auto;
   padding: 0 max(12px, env(safe-area-inset-left)) 0 max(12px, env(safe-area-inset-right));
 }
+main { padding-bottom: 32px; }
 h1 { font-size: 1.25rem; margin: 16px 0 8px; }
 h1 small { font-size: 0.75rem; color: var(--muted); font-weight: normal; }
+h2 { font-size: 1rem; margin: 0 0 6px; }
+p { margin: 2px 0; }
+.sub { color: var(--muted); font-size: 0.8rem; }
 
 .controls { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
 .controls label { display: flex; flex-direction: column; font-size: 0.8rem; color: var(--muted); flex: 1 1 120px; }
-input, button { font: inherit; border-radius: 8px; min-height: 44px; }
-input { padding: 8px 10px; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
-button {
+input, button, select { font: inherit; border-radius: 8px; min-height: 44px; }
+input, select { padding: 8px 10px; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
+.controls button {
   flex: 1 1 160px;
   border: 0;
   padding: 10px 16px;
@@ -53,15 +65,27 @@ button {
 button:active { opacity: 0.8; }
 .status { color: var(--muted); font-size: 0.85rem; }
 
+/* タブ */
+.tabs { display: flex; gap: 4px; background: var(--tab-bg); padding: 4px; border-radius: 10px; margin: 8px 0 12px; position: sticky; top: 0; z-index: 1; }
+.tabs button { flex: 1; border: 0; background: transparent; color: var(--muted); font-size: 0.85rem; padding: 6px 2px; }
+.tabs button[aria-selected="true"] { background: var(--card); color: var(--fg); font-weight: bold; box-shadow: 0 1px 2px rgb(0 0 0 / 0.15); }
+
+/* 文字だけのボタン（クラブ名・選手名） */
+button.link { all: unset; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+button.link:focus-visible { outline: 2px solid var(--accent); }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+
+/* 表 */
 table { width: 100%; border-collapse: collapse; background: var(--card); font-variant-numeric: tabular-nums; table-layout: fixed; }
 th, td { padding: 6px 2px; text-align: right; border-bottom: 1px solid var(--line); }
 th { font-size: 0.75rem; color: var(--muted); font-weight: normal; }
-th:first-child, td:first-child { width: 1.8em; text-align: center; }
-th:not(.club):not(:first-child) { width: 2.1em; }
-th:nth-child(7) { width: 2.8em; }
-th:last-child, td:last-child { width: 2.6em; padding-right: 4px; }
 .club { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 4px; }
-td:last-child { font-weight: bold; }
+
+#table th:first-child, #table td:first-child { width: 1.8em; text-align: center; }
+#table th:not(.club):not(:first-child) { width: 2.1em; }
+#table th:not(.club):nth-child(7) { width: 2.9em; }
+#table th:last-child, #table td:last-child { width: 2.6em; padding-right: 4px; font-weight: bold; }
 tr.champ { background: var(--champ); }
 tr.down { background: var(--down); }
 
@@ -70,10 +94,42 @@ tr.down { background: var(--down); }
 .swatch.champ { background: var(--champ); margin-left: 0; }
 .swatch.down { background: var(--down); }
 
-details { margin: 16px 0 32px; }
-summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
-.round h3 { font-size: 0.85rem; margin: 12px 0 4px; color: var(--muted); }
-.match { display: grid; grid-template-columns: 1fr auto 1fr; gap: 6px; font-size: 0.85rem; padding: 2px 0; }
+/* ランキング */
+.ranking { margin: 0; padding-left: 1.8em; }
+.ranking li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.ranking li > :first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ranking .sub { flex: 0 0 auto; max-width: 7em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ranking .num { flex: 0 0 3.2em; text-align: right; font-weight: bold; font-variant-numeric: tabular-nums; }
+
+/* クラブの選手 */
+.select { display: flex; flex-direction: column; font-size: 0.8rem; color: var(--muted); margin-bottom: 12px; }
+.squad th:nth-child(1) { width: 2.4em; }
+.squad th:nth-child(3) { width: 2em; }
+.squad th:nth-child(4) { width: 3.4em; }
+.squad th:nth-child(5), .squad th:nth-child(6), .squad th:nth-child(7) { width: 2em; }
+.squad th:last-child { padding-right: 4px; }
+.squad tr.player { cursor: pointer; }
+.squad td:last-child { padding-right: 4px; }
+.pos { text-align: center; font-size: 0.75rem; font-weight: bold; }
+.pos-GK { color: #ca8a04; }
+.pos-DF { color: #2563eb; }
+.pos-MF { color: var(--accent); }
+.pos-FW { color: #dc2626; }
+tr.detail td { text-align: left; padding: 8px; background: var(--bg); }
+.attr-grid { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 2px 10px; margin: 0 0 6px; font-size: 0.85rem; }
+.attr-grid dt { color: var(--muted); }
+.attr-grid dd { margin: 0; font-weight: bold; font-variant-numeric: tabular-nums; }
+.g-S, .g-A { color: var(--g-high); }
+.g-B, .g-C { color: var(--fg); }
+.g-D, .g-E { color: var(--g-mid); }
+.g-F, .g-G { color: var(--g-low); }
+
+/* 試合 */
+details.round { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; margin-bottom: 8px; }
+details.round[open] { padding-bottom: 8px; }
+summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: bold; }
+.match { display: grid; grid-template-columns: 1fr auto 1fr; gap: 6px; font-size: 0.85rem; padding: 4px 0 0; }
 .match .home { text-align: right; }
-.match .score { font-variant-numeric: tabular-nums; min-width: 3em; text-align: center; }
+.match .score { font-variant-numeric: tabular-nums; min-width: 3em; text-align: center; font-weight: bold; }
 .match span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scorers { font-size: 0.7rem; color: var(--muted); text-align: center; margin: 0 0 4px; }

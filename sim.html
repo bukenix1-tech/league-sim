@@ -17,10 +17,12 @@
     <pre id="out" class="status"></pre>
   </main>
   <script type="module">
-    import { formatSummary } from "./src/engine/format.js";
-    import { summarize } from "./src/engine/summary.js";
-    import { parseClubData } from "./src/engine/clubs.js";
-    const clubs = parseClubData(await (await fetch("data/clubs.json")).json()).divisions[0].clubs;
+    import { formatAgingCurve, formatSummary } from "./src/engine/format.js";
+    import { agingCurve, summarize } from "./src/engine/summary.js";
+    import { parseClubData, parseNameData } from "./src/engine/clubs.js";
+    const [clubJson, nameJson] = await Promise.all(["data/clubs.json", "data/names.json"].map((u) => fetch(u).then((r) => r.json())));
+    const clubs = parseClubData(clubJson).divisions[0].clubs;
+    const names = parseNameData(nameJson);
     const out = document.getElementById("out");
     document.getElementById("go").addEventListener("click", () => {
       out.textContent = "計算中…";
@@ -28,8 +30,9 @@
         const runs = Number(document.getElementById("runs").value);
         const seed = Number(document.getElementById("seed").value);
         const t0 = performance.now();
-        const s = summarize(clubs, runs, seed);
-        out.textContent = formatSummary(s, clubs, seed) + `\n\n(${((performance.now() - t0) / 1000).toFixed(1)} 秒)`;
+        const s = summarize(clubs, names, runs, seed);
+        const secs = ((performance.now() - t0) / 1000).toFixed(1);
+        out.textContent = `${formatSummary(s, clubs, seed)}\n\n${formatAgingCurve(agingCurve(seed, 2000, 55))}\n\n(${secs} 秒)`;
       }, 0);
     });
   </script>
