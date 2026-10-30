@@ -242,6 +242,8 @@ async function main() {
     view.clubId = /** @type {HTMLSelectElement} */ (e.target).value;
     renderClub();
   });
+  // データを読み終わるまでは押せないようにしてある
+  /** @type {HTMLButtonElement} */ ($("run")).disabled = false;
 }
 
 main().catch((e) => {

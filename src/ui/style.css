@@ -63,6 +63,7 @@ input, select { padding: 8px 10px; border: 1px solid var(--line); background: va
   font-weight: bold;
 }
 button:active { opacity: 0.8; }
+button:disabled { opacity: 0.5; }
 .status { color: var(--muted); font-size: 0.85rem; }
 
 /* タブ */
