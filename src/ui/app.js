@@ -2,7 +2,9 @@
 // 画面。計算は src/engine/ にあり、ここでは表示とセーブの出し入れだけをする。
 
 import { parseClubData, parseNameData } from "../engine/clubs.js";
-import { AUTO_PROMOTED, createLeague, PLAYOFF_FROM, PLAYOFF_TO, playYear, rowGoalDiff, rowPoints } from "../engine/league.js";
+import { budgetRange, forecastRevenue, levelFromBudget, oku, totalRevenue } from "../engine/finance.js";
+import { AUTO_PROMOTED, chooseClub, createLeague, PLAYOFF_FROM, PLAYOFF_TO, playYear, rowGoalDiff, rowPoints, seasonGoal, setBudget } from "../engine/league.js";
+import { divisionOf, seasonBudget } from "../engine/offseason.js";
 import { ATTR_LABEL, ATTRS, grade, overall, TRAITS } from "../engine/players.js";
 import { randomSeed } from "../engine/rng.js";
 import { parseSave, serialize } from "../engine/save.js";
@@ -50,7 +52,7 @@ function showTab(tab) {
   for (const b of document.querySelectorAll("#tabs button")) {
     b.setAttribute("aria-selected", String(/** @type {HTMLElement} */ (b).dataset.tab === tab));
   }
-  for (const name of ["table", "leaders", "club", "rounds", "history"]) $(`tab-${name}`).hidden = name !== tab;
+  for (const name of ["office", "table", "leaders", "club", "rounds", "history"]) $(`tab-${name}`).hidden = name !== tab;
   $("div-switch").hidden = !["table", "leaders", "rounds"].includes(tab);
 }
 
@@ -77,6 +79,162 @@ function openClub(clubId) {
 /** @param {string} text */
 const empty = (text) => el("p", "status", text);
 
+/**
+ * 見出しと値の組を並べる
+ * @param {[string, string, string?][]} pairs [見出し, 値, 値の class]
+ */
+function facts(pairs) {
+  const dl = el("dl", "facts");
+  for (const [k, v, cls] of pairs) dl.append(el("dt", "", k), el("dd", cls ?? "", v));
+  return dl;
+}
+
+function renderOffice() {
+  const u = L().user;
+  if (!u) return;
+  const club = L().clubs[u.clubId];
+  const f = club.finance;
+  const { div, n } = divisionOf(L(), club.id);
+  const goal = seasonGoal(L(), club.id);
+  const rec = lastRecord()?.user;
+
+  const head = el("div", "card mine-card");
+  head.append(
+    el("h2", "", club.name),
+    el("p", "sub", `${L().year} 年は${L().divisions[div].name}・クラブの規模 ${grade(club.level)} ${club.level.toFixed(0)}`),
+    facts([
+      ["手元のお金", oku(f.cash), f.cash < 0 ? "neg" : ""],
+      ["人気（ファン）", `${f.popularity.toFixed(1)} 万人`],
+      ["スタジアム", `${f.capacity.toLocaleString()} 席`],
+      ["収入の見込み", oku(forecastRevenue(f, div, n))],
+    ]),
+  );
+
+  const owner = el("div", "card");
+  owner.append(el("h2", "", "オーナー"));
+  owner.append(el("p", "", `${L().year} 年の目標: ${goal.label}`));
+  const bar = el("div", "meter");
+  const fill = el("span");
+  fill.style.width = `${u.trust}%`;
+  bar.append(fill);
+  owner.append(el("p", "sub", `信頼 ${u.trust} / 100`), bar);
+  if (rec) {
+    const e = rec.evaluation;
+    owner.append(el("p", "sub", `${lastRecord()?.year} 年: 目標「${e.goal.label}」→ ${e.pos} 位で${e.achieved ? "達成" : "届かず"}。「${e.comment}」`));
+  }
+
+  // 年俸の予算
+  const range = budgetRange(f, div, n);
+  const current = seasonBudget(L(), club);
+  const budget = el("div", "card");
+  budget.append(el("h2", "", `${L().year} 年の年俸の予算`));
+  const value = el("p", "big");
+  const hint = el("p", "sub");
+  const slider = /** @type {HTMLInputElement} */ (el("input", "slider"));
+  slider.type = "range";
+  slider.min = String(range.min);
+  slider.max = String(range.max);
+  slider.step = "0.1";
+  slider.value = String(current);
+  slider.setAttribute("aria-label", "年俸の予算");
+  const show = (/** @type {number} */ b) => {
+    const target = levelFromBudget(b);
+    value.textContent = oku(b);
+    hint.textContent = `補強で目指す強さ ${grade(target)} ${target.toFixed(0)}（今のクラブの規模 ${club.level.toFixed(0)}）`;
+  };
+  show(current);
+  slider.addEventListener("input", () => show(Number(slider.value)));
+  slider.addEventListener("change", async () => {
+    ui.league = setBudget(L(), Number(slider.value));
+    renderOffice();
+    await save();
+  });
+  const mode = el("p", "sub", u.budget === null ? "いまは「おまかせ」（収入とお金の残りから自動で決める）" : "自分で決めた予算");
+  budget.append(value, slider, el("p", "sub", `${oku(range.min)} 〜 ${oku(range.max)}`), hint, mode);
+  if (u.budget !== null) {
+    const reset = el("button", "secondary small", "おまかせに戻す");
+    reset.addEventListener("click", async () => {
+      ui.league = setBudget(L(), null);
+      renderOffice();
+      await save();
+    });
+    budget.append(reset);
+  }
+  budget.append(
+    el(
+      "p",
+      "sub",
+      "予算を上げると、夏の補強で強い選手を取りやすくなり、クラブの規模も上がっていきます。実際に払う年俸は今いる選手で決まるので、" +
+        "強い選手がそろうにつれて少しずつ増えます。借金がふくらむと、上げられる上限が下がります。",
+    ),
+  );
+
+  const nodes = [head, owner, budget];
+  if (f.last) {
+    const m = f.last;
+    const money = el("div", "card");
+    money.append(el("h2", "", `${lastRecord()?.year} 年の収支`));
+    money.append(
+      facts([
+        ["入場料", oku(m.revenue.tickets)],
+        ["放映権", oku(m.revenue.tv)],
+        ["スポンサー", oku(m.revenue.sponsor)],
+        ["グッズ", oku(m.revenue.goods)],
+        ["収入の合計", oku(totalRevenue(m.revenue)), "strong"],
+        ["年俸", `−${oku(m.wages)}`],
+        ["運営費", `−${oku(m.ops)}`],
+        ["収支", oku(m.profit), m.profit < 0 ? "neg strong" : "strong"],
+      ]),
+      el("p", "sub", `観客 1 試合 ${m.attendance.toLocaleString()} 人`),
+    );
+    nodes.push(money);
+  }
+  $("tab-office").replaceChildren(...nodes);
+}
+
+/** @param {number} div */
+function renderPicker(div) {
+  for (const b of document.querySelectorAll("#picker-div button")) {
+    b.setAttribute("aria-pressed", String(Number(/** @type {HTMLElement} */ (b).dataset.div) === div));
+  }
+  const ids = [...L().divisions[div].clubIds].sort((a, b) => L().clubs[a].level - L().clubs[b].level);
+  $("picker-list").replaceChildren(
+    ...ids.map((id) => {
+      const c = L().clubs[id];
+      const li = el("li");
+      const b = el("button", "pick");
+      b.append(
+        el("span", "name", c.name),
+        el("span", "sub", `規模 ${grade(c.level)} ${c.level.toFixed(0)}・人気 ${c.finance.popularity.toFixed(0)} 万人・お金 ${oku(c.finance.cash)}`),
+      );
+      b.addEventListener("click", async () => {
+        if (!confirm(`${c.name} の経営者になりますか？`)) return;
+        ui.league = chooseClub(L(), id);
+        ui.clubId = id;
+        await save();
+        showGame();
+      });
+      li.append(b);
+      return li;
+    }),
+  );
+}
+
+function showPicker() {
+  $("picker").hidden = false;
+  for (const id of ["game-controls", "tabs", "div-switch"]) $(id).hidden = true;
+  for (const p of document.querySelectorAll(".panel:not(#picker)")) /** @type {HTMLElement} */ (p).hidden = true;
+  $("status").textContent = `${L().year} 年。経営するクラブを選んでください（クラブ名を押す）。`;
+  renderPicker(1);
+}
+
+function showGame() {
+  $("picker").hidden = true;
+  $("game-controls").hidden = false;
+  renderAll();
+  showTab("office");
+}
+
 function renderTable() {
   const rec = lastRecord();
   const tbody = /** @type {HTMLTableSectionElement} */ ($("table").querySelector("tbody"));
@@ -93,7 +251,7 @@ function renderTable() {
       let cls = "";
       if (ui.div === 0) cls = i === 0 ? "champ" : i >= n - 3 ? "down" : "";
       else cls = i < AUTO_PROMOTED ? "champ" : i >= PLAYOFF_FROM - 1 && i < PLAYOFF_TO ? "po" : "";
-      const tr = el("tr", cls);
+      const tr = el("tr", `${cls}${r[0] === L().user?.clubId ? " mine" : ""}`);
       const label = `${clubShort(r[0])}${ui.div === 1 && r[0] === rec.playoff.winner ? " ★" : ""}`;
       const cells = [i + 1, label, r[1] + r[2] + r[3], r[1], r[2], r[3], signed(rowGoalDiff(r)), rowPoints(r)];
       cells.forEach((v, j) => {
@@ -308,12 +466,33 @@ function renderHistory() {
     if (h.offseason.takeovers.length) card.append(el("p", "sub", `新しいオーナー: ${h.offseason.takeovers.map(clubShort).join("・")}`));
     return card;
   });
-  $("tab-history").replaceChildren(summary, ...years);
+  const mine = history.filter((h) => h.user);
+  /** @type {HTMLElement[]} */
+  const nodes = [];
+  if (mine.length) {
+    const card = el("div", "card mine-card");
+    card.append(el("h2", "", `${clubName(/** @type {any} */ (mine[0].user).clubId)} の歩み`));
+    const ol = el("ol", "ranking journey");
+    for (const h of [...mine].reverse()) {
+      const u = /** @type {import("../engine/league.js").UserRecord} */ (h.user);
+      const li = el("li");
+      li.append(
+        el("span", "", `${h.year} 年 ${L().divisions[u.division].name} ${u.evaluation.pos} 位${u.evaluation.achieved ? "" : "（目標に届かず）"}`),
+        el("span", `num ${u.money.profit < 0 ? "neg" : ""}`, oku(u.money.profit)),
+      );
+      ol.append(li);
+    }
+    card.append(ol);
+    nodes.push(card);
+  }
+  $("tab-history").replaceChildren(...nodes, summary, ...years);
 }
 
 function renderStatus() {
   const rec = lastRecord();
+  const u = L().user;
   let text = `${L().year} 年のシーズン前（種 ${L().seed}）。`;
+  if (u) text += ` あなたのクラブ: ${clubName(u.clubId)}（${L().divisions[divisionOf(L(), u.clubId).div].name}）。`;
   if (rec) {
     text += ` ${rec.year} 年は ${clubName(rec.tables[0][0][0])} が優勝。昇格 ${rec.promoted.map(clubShort).join("・")}、降格 ${rec.relegated.map(clubShort).join("・")}。`;
   }
@@ -322,6 +501,7 @@ function renderStatus() {
 
 function renderAll() {
   renderStatus();
+  renderOffice();
   renderClubSelect();
   renderTable();
   renderLeaders();
@@ -329,7 +509,7 @@ function renderAll() {
   renderRounds();
   renderHistory();
   $("tabs").hidden = false;
-  if ([...document.querySelectorAll(".panel")].every((p) => /** @type {HTMLElement} */ (p).hidden)) showTab("table");
+  if ([...document.querySelectorAll(".panel:not(#picker)")].every((p) => /** @type {HTMLElement} */ (p).hidden)) showTab("office");
 }
 
 /** @param {boolean} busy */
@@ -400,9 +580,14 @@ async function main() {
     ui.league = createLeague(clubData, names, randomSeed());
     await save();
   }
-  renderAll();
+  // 自分のクラブがまだ決まっていなければ、選ぶ画面から
+  const showCurrent = () => (L().user ? showGame() : showPicker());
+  showCurrent();
   if (note) $("status").textContent += note;
 
+  for (const b of document.querySelectorAll("#picker-div button")) {
+    b.addEventListener("click", () => renderPicker(Number(/** @type {HTMLElement} */ (b).dataset.div)));
+  }
   $("next1").addEventListener("click", () => advance(names, 1));
   $("next10").addEventListener("click", () => advance(names, 10));
   for (const b of document.querySelectorAll("#tabs button")) {
@@ -424,7 +609,7 @@ async function main() {
     try {
       ui.league = parseSave(await file.text());
       ui.seasons = null;
-      renderAll();
+      showCurrent();
       await save();
       $("status").textContent += "（読み込みました）";
     } catch (err) {
@@ -437,7 +622,7 @@ async function main() {
     const seed = input.value === "" ? randomSeed() : Number(input.value) >>> 0;
     ui.league = createLeague(clubData, names, seed);
     ui.seasons = null;
-    renderAll();
+    showPicker();
     await save();
   });
   setBusy(false);

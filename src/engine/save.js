@@ -1,6 +1,7 @@
 // @ts-check
 // セーブの書き出しと読み込み。版の番号を見て、古い形なら今の形に直してから使う。
 
+import { initialFinance } from "./finance.js";
 import { SAVE_VERSION } from "./league.js";
 
 /** @typedef {import("./league.js").League} League */
@@ -10,7 +11,17 @@ import { SAVE_VERSION } from "./league.js";
  * 例: セーブの形を変えて SAVE_VERSION を 2 にしたら、MIGRATIONS[1] を足す。
  * @type {Record<number, (save: any) => any>}
  */
-const MIGRATIONS = {};
+const MIGRATIONS = {
+  // 版 1 → 2（段階 4）: クラブにお金と人気を足し、自分のクラブはまだ決まっていない形にする
+  1: (save) => ({
+    ...save,
+    clubs: Object.fromEntries(
+      Object.entries(save.clubs).map(([id, c]) => [id, { .../** @type {object} */ (c), finance: initialFinance(/** @type {any} */ (c).level) }]),
+    ),
+    history: save.history.map((/** @type {any} */ h) => ({ ...h, user: null })),
+    user: null,
+  }),
+};
 
 /** @param {League} league */
 export function serialize(league) {
@@ -36,7 +47,7 @@ export function parseSave(text) {
     if (!migrate) throw new Error(`版 ${save.version} のセーブは読めません`);
     save = { ...migrate(save), version: save.version + 1 };
   }
-  for (const key of ["seed", "year", "nextPlayerId", "divisions", "clubs", "players", "history"]) {
+  for (const key of ["seed", "year", "nextPlayerId", "divisions", "clubs", "players", "history", "user"]) {
     if (!(key in save)) throw new Error(`セーブに ${key} がありません`);
   }
   return save;

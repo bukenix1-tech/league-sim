@@ -10,12 +10,20 @@ import { serialize } from "./save.js";
  * @typedef {import("./clubs.js").NameData} NameData
  * @typedef {import("./league.js").League} League
  * @typedef {{ year: number, champion: string, championPoints: number, top11: number[], best: number,
- *             players: number, avgAge: number, young: number, ms: number }} YearRow
+ *             players: number, avgAge: number, young: number, ms: number,
+ *             level: number[], cashMedian: number[], cashMin: number, cashMax: number, cashTotal: number,
+ *             debtClubs: number, revenue: number[] }} YearRow
+ *   level・cashMedian・revenue は部ごと
  *   top11 は部ごとに「各クラブの上位 11 人の総合力の平均」をさらに平均したもの
  */
 
 /** @param {number[]} xs */
 const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+/** @param {number[]} xs */
+const median = (xs) => {
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+};
 
 /**
  * @param {League} league
@@ -49,6 +57,17 @@ export function longRun(clubData, names, seed, years) {
       avgAge: mean(all.map((p) => p.age)),
       young: all.filter((p) => p.age <= 21).length,
       ms,
+      level: league.divisions.map((d) => mean(d.clubIds.map((id) => league.clubs[id].level))),
+      cashMedian: league.divisions.map((d) => median(d.clubIds.map((id) => league.clubs[id].finance.cash))),
+      cashMin: Math.min(...Object.values(league.clubs).map((c) => c.finance.cash)),
+      cashMax: Math.max(...Object.values(league.clubs).map((c) => c.finance.cash)),
+      cashTotal: Object.values(league.clubs).reduce((sum, c) => sum + c.finance.cash, 0),
+      debtClubs: Object.values(league.clubs).filter((c) => c.finance.cash < 0).length,
+      // 降格・昇格したあとの部ではなく、シーズンを戦った部での収入
+      revenue: record.tables.map((t) => mean(t.map((r) => {
+        const m = league.clubs[r[0]].finance.last;
+        return m ? m.revenue.tickets + m.revenue.tv + m.revenue.sponsor + m.revenue.goods : 0;
+      }))),
     });
   }
 

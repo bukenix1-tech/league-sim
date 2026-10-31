@@ -85,6 +85,30 @@ button:disabled { opacity: 0.5; }
 .seg button { flex: 1; border: 0; border-radius: 0; background: var(--card); color: var(--muted); min-height: 36px; padding: 4px; }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); font-weight: bold; }
 tr.po { background: var(--po); }
+tr.mine td { font-weight: bold; }
+tr.mine .club button::before { content: "▶ "; color: var(--accent); }
+
+/* 経営 */
+.mine-card { border-color: var(--accent); }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 0; font-variant-numeric: tabular-nums; }
+.facts dt { color: var(--muted); font-size: 0.85rem; }
+.facts dd { margin: 0; text-align: right; }
+.facts dd.strong { font-weight: bold; }
+.neg { color: var(--g-low); }
+.big { font-size: 1.4rem; font-weight: bold; margin: 4px 0; font-variant-numeric: tabular-nums; }
+.slider { width: 100%; min-height: 44px; accent-color: var(--accent); }
+.meter { height: 8px; background: var(--tab-bg); border-radius: 4px; overflow: hidden; margin: 4px 0 6px; }
+.meter span { display: block; height: 100%; background: var(--accent); }
+button.small { min-height: 36px; padding: 4px 12px; font-size: 0.85rem; border: 1px solid var(--line); background: var(--card); color: var(--fg); margin: 6px 0; }
+.journey .num { flex-basis: 6.5em; }
+
+/* クラブ選び */
+.picker { list-style: none; margin: 0; padding: 0; }
+.picker li { margin-bottom: 8px; }
+.pick { all: unset; box-sizing: border-box; display: flex; flex-direction: column; width: 100%; padding: 10px 12px; min-height: 44px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.pick:focus-visible { outline: 2px solid var(--accent); }
+.pick .name { font-weight: bold; }
 .swatch.po { background: var(--po); }
 .year h2 { margin-bottom: 2px; }
 .status { color: var(--muted); font-size: 0.85rem; }
@@ -130,7 +154,8 @@ tr.down { background: var(--down); }
 .squad th:nth-child(1) { width: 2.4em; }
 .squad th:nth-child(3) { width: 2em; }
 .squad th:nth-child(4) { width: 3.4em; }
-.squad th:nth-child(5), .squad th:nth-child(6), .squad th:nth-child(7) { width: 2em; }
+.squad th:nth-child(5), .squad th:nth-child(6) { width: 2em; }
+.squad th:nth-child(7) { width: 2.8em; }
 .squad th:last-child { padding-right: 4px; }
 .squad tr.player { cursor: pointer; }
 .squad td:last-child { padding-right: 4px; }

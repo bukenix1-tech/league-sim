@@ -10,7 +10,9 @@ import { makeSchedule } from "../src/engine/schedule.js";
 import { fatigueLoss, injuryChance, playSeason } from "../src/engine/season.js";
 import { addResult, createTable, goalDiff, points, standings } from "../src/engine/table.js";
 import { generateWorld, makePlayer, SQUAD_SHAPE } from "../src/engine/world.js";
-import { createLeague, playYear, RELEGATED, SAVE_VERSION } from "../src/engine/league.js";
+import { chooseClub, createLeague, playYear, RELEGATED, SAVE_VERSION, seasonGoal, setBudget } from "../src/engine/league.js";
+import { autoBudget, budgetForLevel, budgetRange, initialFinance, levelFromBudget, nextPopularity, revenue, totalRevenue, wage } from "../src/engine/finance.js";
+import { evaluate, ownerGoal } from "../src/engine/owner.js";
 import { retireChance } from "../src/engine/offseason.js";
 import { parseSave, serialize } from "../src/engine/save.js";
 
@@ -325,18 +327,18 @@ export function makeCases(clubJson, nameJson) {
       },
     },
     {
-      name: "何年も: どのクラブも毎年 22 人そろい、同じ選手が 2 つのクラブにいない",
+      name: "何年も: シーズン中はどのクラブも 22 人そろい、同じ選手が 2 つのクラブにいない",
       fn() {
-        for (const { league } of years) {
+        for (const { league, seasons } of years) {
+          // シーズン中の人数（引退した選手はシーズンの後で抜けるので、シーズンの記録で数える）
+          /** @type {Map<string, number>} */
+          const perClub = new Map();
+          for (const s of seasons) for (const st of s.stats.values()) perClub.set(st.club, (perClub.get(st.club) ?? 0) + 1);
+          eq([...perClub.values()].every((n) => n === 22), true, "22 人でないクラブがある");
+          eq(perClub.size, 44);
           const ids = Object.values(league.clubs).flatMap((c) => c.playerIds);
-          eq(ids.length, 44 * 22);
           eq(new Set(ids).size, ids.length);
           eq(Object.keys(league.players).length, ids.length, "選手の表とクラブの選手が合わない");
-          for (const c of Object.values(league.clubs)) {
-            const counts = { GK: 0, DF: 0, MF: 0, FW: 0 };
-            for (const id of c.playerIds) counts[league.players[id].pos]++;
-            eq(counts, SQUAD_SHAPE, c.name);
-          }
         }
       },
     },
@@ -346,9 +348,10 @@ export function makeCases(clubJson, nameJson) {
         const p0 = Object.values(start.players)[0];
         const p1 = years[0].league.players[p0.id];
         if (p1) eq(p1.age, p0.age + 1);
-        const o = years[0].record.offseason;
-        ok(o.retired + o.released > 0, "入れ替わりが無い");
-        eq(o.joined, o.retired + o.released);
+        const [o0, o1] = [years[0].record.offseason, years[1].record.offseason];
+        ok(o0.retired > 0, "引退が無い");
+        // シーズンの後に引退した分と、シーズン前に放出した分を、シーズン前に補強する
+        eq(o1.joined, o0.retired + o1.released);
         eq(retireChance(30), 0);
         eq(retireChance(40), 1);
       },
@@ -390,6 +393,95 @@ export function makeCases(clubJson, nameJson) {
         ok(bad(JSON.stringify({ ...after, version: SAVE_VERSION + 1 })), "新しい版を読んだ");
         ok(bad("{これは JSON ではない"), "壊れたファイルを読んだ");
         ok(bad(JSON.stringify({ version: SAVE_VERSION })), "中身の無いセーブを読んだ");
+      },
+    },
+    {
+      name: "セーブ: 版 1（段階 3）のセーブを読むと、お金が足されて続きから遊べる",
+      fn() {
+        const old = JSON.parse(serialize(after));
+        old.version = 1;
+        delete old.user;
+        for (const c of Object.values(old.clubs)) delete /** @type {any} */ (c).finance;
+        for (const h of old.history) delete h.user;
+        const loaded = parseSave(JSON.stringify(old));
+        eq(loaded.version, SAVE_VERSION);
+        eq(loaded.user, null);
+        ok(Object.values(loaded.clubs).every((c) => c.finance.popularity > 0), "お金が足されていない");
+        eq(playYear(loaded, names).league.year, after.year + 1);
+      },
+    },
+    {
+      name: "お金: 予算と規模は行き来でき、規模が高いほど年俸がかかる",
+      fn() {
+        for (const level of [45, 60, 80]) ok(Math.abs(levelFromBudget(budgetForLevel(level)) - level) < 1e-9, `${level}`);
+        ok(budgetForLevel(80) > budgetForLevel(60) * 2, "差が小さすぎる");
+        const strong = squad(0)[0];
+        const weak = { ...strong, attrs: { ...strong.attrs, gk: 50, pas: 40 } };
+        ok(wage(strong) > wage(weak), "うまい選手の年俸が高くない");
+      },
+    },
+    {
+      name: "お金: 同じクラブでも 1 部の方が収入が多く、上の順位ほど多い。パラシュートで 2 部の放映権が増える",
+      fn() {
+        const f = initialFinance(60);
+        const r1 = totalRevenue(revenue(f, 0, 10, 20));
+        const r2 = totalRevenue(revenue(f, 1, 10, 24));
+        ok(r1 > r2 * 1.2, `1 部 ${r1} / 2 部 ${r2}`);
+        ok(totalRevenue(revenue(f, 0, 1, 20)) > totalRevenue(revenue(f, 0, 20, 20)), "順位で増えない");
+        ok(revenue({ ...f, parachute: 1 }, 1, 10, 24).tv > revenue(f, 1, 10, 24).tv, "パラシュートが効かない");
+      },
+    },
+    {
+      name: "お金: 借金があると予算の上限が下がり、おまかせの予算は幅の中に入る",
+      fn() {
+        const f = initialFinance(65);
+        const rich = budgetRange({ ...f, cash: 200 }, 0, 20);
+        const poor = budgetRange({ ...f, cash: -100 }, 0, 20);
+        ok(rich.max > poor.max, "借金で上限が下がらない");
+        for (const cash of [-100, 0, 300]) {
+          const g = { ...f, cash };
+          const b = autoBudget(g, 0, 20);
+          const r = budgetRange(g, 0, 20);
+          ok(b >= r.min - 1e-9 && b <= r.max + 1e-9, `cash ${cash}: ${b}`);
+        }
+      },
+    },
+    {
+      name: "人気: 上の順位なら増え、下の順位なら減る（少しずつ）",
+      fn() {
+        const up = nextPopularity(30, 0, 1, 20);
+        const down = nextPopularity(30, 0, 20, 20);
+        ok(up > 30 && down < 30, `${up} / ${down}`);
+        ok(up < 30 * 1.6, "動きが大きすぎる");
+      },
+    },
+    {
+      name: "オーナー: 規模が大きいほど目標が高く、達成で信頼が上がり、外すと下がる（0〜100）",
+      fn() {
+        eq(ownerGoal(1, 0, 20).maxPos, 1);
+        eq(ownerGoal(20, 0, 20).maxPos, 17);
+        eq(ownerGoal(1, 1, 24).maxPos, 2);
+        const g = ownerGoal(10, 0, 20);
+        ok(evaluate(g, 5, 60).trust > 60, "達成で上がらない");
+        ok(evaluate(g, 18, 60).trust < 60, "外して下がらない");
+        eq(evaluate(g, 1, 95).trust, 100);
+        eq(evaluate(g, 20, 10).trust, 0);
+      },
+    },
+    {
+      name: "自分のクラブ: 予算を上げると規模が上がり、評価とお金の記録が残る",
+      fn() {
+        const id = "ykc"; // 2 部の一番小さいクラブ
+        const mine = chooseClub(start, id);
+        const { min, max } = budgetRange(mine.clubs[id].finance, 1, 24);
+        const low = playYear(setBudget(mine, min), names);
+        const high = playYear(setBudget(mine, max), names);
+        ok(high.league.clubs[id].level > low.league.clubs[id].level, "予算が効かない");
+        ok(high.league.clubs[id].finance.cash < low.league.clubs[id].finance.cash, "予算を上げてもお金が減らない");
+        const rec = high.record.user;
+        ok(rec && rec.clubId === id && rec.division === 1, "記録が無い");
+        ok(rec && Math.abs(rec.budget - max) < 1e-9, "予算が記録と違う");
+        eq(seasonGoal(mine, id).maxPos, 18);
       },
     },
   ];

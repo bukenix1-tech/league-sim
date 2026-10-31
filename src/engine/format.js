@@ -82,6 +82,12 @@ export function formatLongRun(r) {
     `1 部 ${avg(rows.map((x) => x.top11[0])).toFixed(1)} / 2 部 ${avg(rows.map((x) => x.top11[1])).toFixed(1)} / ` +
     `一番うまい選手 ${avg(rows.map((x) => x.best)).toFixed(1)} / 選手 ${avg(rows.map((x) => x.players)).toFixed(0)} 人 / ` +
     `平均 ${avg(rows.map((x) => x.avgAge)).toFixed(1)} 歳 / 21 歳以下 ${avg(rows.map((x) => x.young)).toFixed(0)} 人`;
+  /** @param {typeof r.rows} rows */
+  const money = (rows) =>
+    `規模 1 部 ${avg(rows.map((x) => x.level[0])).toFixed(1)} / 2 部 ${avg(rows.map((x) => x.level[1])).toFixed(1)}、` +
+    `収入 1 部 ${avg(rows.map((x) => x.revenue[0])).toFixed(0)} / 2 部 ${avg(rows.map((x) => x.revenue[1])).toFixed(0)}、` +
+    `手元のお金（真ん中のクラブ）1 部 ${avg(rows.map((x) => x.cashMedian[0])).toFixed(0)} / 2 部 ${avg(rows.map((x) => x.cashMedian[1])).toFixed(0)}、` +
+    `リーグ全体 ${avg(rows.map((x) => x.cashTotal)).toFixed(0)}、借金のクラブ ${avg(rows.map((x) => x.debtClubs)).toFixed(1)}`;
   return [
     `${n} 年 回したまとめ`,
     "",
@@ -99,12 +105,17 @@ export function formatLongRun(r) {
     `  はじめの 5 年: ${line(first)}`,
     `  おわりの 5 年: ${line(last)}`,
     "",
+    "■ お金（億円）",
+    `  はじめの 5 年: ${money(first)}`,
+    `  おわりの 5 年: ${money(last)}`,
+    `  一番お金持ち ${Math.max(...r.rows.map((x) => x.cashMax)).toFixed(0)}、一番の借金 ${Math.min(...r.rows.map((x) => x.cashMin)).toFixed(0)}（50 年の中で）`,
+    "",
     "■ 重さ",
     `  1 年あたり ${r.msPerYear.toFixed(0)} ミリ秒、セーブの大きさ ${(r.saveBytes / 1024).toFixed(0)} KB`,
     "",
     "■ 10 年ごと",
     ...r.rows
       .filter((_, i) => i % 10 === 9)
-      .map((x) => `  ${x.year} 年  優勝 ${r.league.clubs[x.champion]?.short}（${x.championPoints}）  1 部 ${x.top11[0].toFixed(1)}  2 部 ${x.top11[1].toFixed(1)}  選手 ${x.players} 人`),
+      .map((x) => `  ${x.year} 年  優勝 ${r.league.clubs[x.champion]?.short}（${x.championPoints}）  1 部 ${x.top11[0].toFixed(1)}  2 部 ${x.top11[1].toFixed(1)}  お金 全体 ${x.cashTotal.toFixed(0)}・借金 ${x.debtClubs} クラブ`),
   ].join("\n");
 }

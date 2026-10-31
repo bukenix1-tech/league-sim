@@ -7,21 +7,34 @@
   <title>リーグ運営シム</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="src/ui/style.css">
+  <link rel="stylesheet" href="src/ui/style.css?v=4">
 </head>
 <body>
   <header>
-    <h1>リーグ運営シム <small>段階 3</small></h1>
+    <h1>リーグ運営シム <small>段階 4</small></h1>
   </header>
   <main>
-    <section class="controls">
+    <section id="picker" class="panel" hidden>
+      <div class="card">
+        <h2>自分のクラブを選ぶ</h2>
+        <p class="sub">あなたはクラブの経営者です。試合は監督に任せ、お金と補強の予算を決めます。2 部の小さなクラブから 1 部の優勝を目指すのがおすすめです。</p>
+      </div>
+      <div class="seg" id="picker-div">
+        <button type="button" data-div="0" aria-pressed="false">1 部</button>
+        <button type="button" data-div="1" aria-pressed="true">2 部</button>
+      </div>
+      <ul id="picker-list" class="picker"></ul>
+    </section>
+
+    <section id="game-controls" class="controls" hidden>
       <button id="next1" type="button" disabled>1 年進める</button>
       <button id="next10" type="button" class="secondary" disabled>10 年進める</button>
     </section>
     <p id="status" class="status">読み込み中…</p>
 
     <nav id="tabs" class="tabs" role="tablist" hidden>
-      <button type="button" role="tab" data-tab="table" aria-selected="true">順位</button>
+      <button type="button" role="tab" data-tab="office" aria-selected="true">経営</button>
+      <button type="button" role="tab" data-tab="table" aria-selected="false">順位</button>
       <button type="button" role="tab" data-tab="leaders" aria-selected="false">個人</button>
       <button type="button" role="tab" data-tab="club" aria-selected="false">クラブ</button>
       <button type="button" role="tab" data-tab="rounds" aria-selected="false">試合</button>
@@ -32,6 +45,8 @@
       <button type="button" data-div="0" aria-pressed="true">1 部</button>
       <button type="button" data-div="1" aria-pressed="false">2 部</button>
     </div>
+
+    <section id="tab-office" class="panel" hidden></section>
 
     <section id="tab-table" class="panel" hidden>
       <table id="table">
@@ -66,7 +81,7 @@
 
     <details class="card save">
       <summary>セーブ・新しく始める</summary>
-      <p class="sub">1 年進めるたびに、このブラウザの中に自動でセーブします。別の端末に移すときや、念のための控えには「書き出し」を使ってください。</p>
+      <p class="sub">1 年進めるたびと予算を変えたときに、このブラウザの中に自動でセーブします。別の端末に移すときや、念のための控えには「書き出し」を使ってください。</p>
       <div class="row">
         <button id="export" type="button" class="secondary">書き出し</button>
         <label class="file-button secondary">読み込み<input id="import" type="file" accept="application/json,.json"></label>
@@ -77,6 +92,6 @@
       </div>
     </details>
   </main>
-  <script type="module" src="src/ui/app.js"></script>
+  <script type="module" src="src/ui/app.js?v=4"></script>
 </body>
 </html>
