@@ -12,8 +12,9 @@ import { overall } from "./players.js";
  * @typedef {{ in: number, out: number, invest?: number }} Transfers  移籍金の入りと出、施設に使ったお金（シーズンの間にたまり、シーズンの収支に入る）
  * @typedef {{ revenue: Revenue, wages: number, ops: number, facilities: number, transfers: Transfers, profit: number,
  *             dividend: number, attendance: number }} SeasonMoney  profit は配当の前
+ * @typedef {"low" | "normal" | "high"} TicketLevel  入場料の値段
  * @typedef {{ cash: number, popularity: number, capacity: number, budget: number, parachute: number,
- *             facilities: Facilities, transfers: Transfers, last: SeasonMoney | null }} Finance
+ *             facilities: Facilities, transfers: Transfers, ticket?: TicketLevel, last: SeasonMoney | null }} Finance
  *   cash は手元のお金（マイナスは借金）、popularity はファンの数（万人）、capacity はスタジアムの席の数、
  *   budget はこのシーズンの年俸の予算、parachute は降格したあと放映権を多めにもらえる残りの年数
  */
@@ -85,9 +86,22 @@ export const dividend = (cash, rev) => Math.max(0, cash - rev * DIVIDEND_FROM) *
 export const PARACHUTE = 12;
 export const PARACHUTE_YEARS = 2;
 
+/**
+ * 入場料の値段ごとの、値段の倍率・来たい人の倍率・人気の毎年の変わり方
+ * @type {Record<TicketLevel, { label: string, price: number, demand: number, popularity: number }>}
+ */
+export const TICKET_LEVELS = {
+  low: { label: "安い", price: 0.75, demand: 1.2, popularity: 0.02 },
+  normal: { label: "普通", price: 1, demand: 1, popularity: 0 },
+  high: { label: "高い", price: 1.35, demand: 0.8, popularity: -0.02 },
+};
+
+/** @param {Finance} f */
+const ticketOf = (f) => TICKET_LEVELS[f.ticket ?? "normal"];
+
 /** 1 試合あたりの観客（スタジアムの席の数まで） @param {Finance} f */
 export function attendance(f) {
-  return Math.min(f.capacity, Math.round(4000 * f.popularity ** 0.55));
+  return Math.min(f.capacity, Math.round(4000 * f.popularity ** 0.55 * ticketOf(f).demand));
 }
 
 /**
@@ -97,7 +111,7 @@ export function attendance(f) {
 export function revenue(f, div, pos, n) {
   const homeGames = n - 1;
   return {
-    tickets: (attendance(f) * TICKET_PRICE[div] * homeGames) / 1e8,
+    tickets: (attendance(f) * TICKET_PRICE[div] * ticketOf(f).price * homeGames) / 1e8,
     tv: tvMoney(div, pos, n) + (div === 1 && f.parachute > 0 ? PARACHUTE : 0),
     sponsor: 2.6 * f.popularity ** POPULARITY_EXP,
     goods: 1.0 * f.popularity ** POPULARITY_EXP,
@@ -152,10 +166,11 @@ export function popularityTarget(div, pos, n) {
 export const POPULARITY_PULL = 0.12;
 
 /**
- * @param {number} popularity @param {number} div @param {number} pos @param {number} n
+ * @param {number} popularity @param {number} div @param {number} pos @param {number} n @param {TicketLevel} [ticket]
  */
-export function nextPopularity(popularity, div, pos, n) {
+export function nextPopularity(popularity, div, pos, n, ticket = "normal") {
   let p = popularity + (popularityTarget(div, pos, n) - popularity) * POPULARITY_PULL;
+  p *= 1 + TICKET_LEVELS[ticket].popularity; // 入場料が安いとファンが増え、高いと減る
   if (div === 0 && pos === 1) p *= 1.05; // 優勝すると少し増える
   return Math.round(Math.max(1, p) * 10) / 10;
 }

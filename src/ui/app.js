@@ -13,6 +13,9 @@ import {
   oku,
   STADIUM_MAX,
   STADIUM_STEP,
+  attendance,
+  managerWage,
+  TICKET_LEVELS,
   totalRevenue,
   trainingBonus,
 } from "../engine/finance.js";
@@ -20,16 +23,35 @@ import {
   acceptBid,
   acceptOffer,
   buyPlayer,
+  hireManager,
   marketList,
   releaseCost,
   releasePlayer,
   renewContract,
   sellPlayer,
+  sackCost,
   setAutoTransfers,
+  setTicket,
   spendLimit,
   upgradeFacility,
 } from "../engine/market.js";
-import { AUTO_PROMOTED, chooseClub, createLeague, PLAYOFF_FROM, PLAYOFF_TO, playYear, rowGoalDiff, rowPoints, seasonGoal, setBudget } from "../engine/league.js";
+import {
+  AUTO_PROMOTED,
+  chooseClub,
+  createLeague,
+  FIRE_TRUST,
+  PLAYOFF_FROM,
+  PLAYOFF_TO,
+  playFirstHalf,
+  playSecondHalf,
+  playYear,
+  rowGoalDiff,
+  rowPoints,
+  seasonGoal,
+  setBudget,
+} from "../engine/league.js";
+import { loadProgress } from "../engine/season.js";
+import { standings } from "../engine/table.js";
 import { divisionOf, seasonBudget } from "../engine/offseason.js";
 import { ATTR_LABEL, ATTRS, grade, overall, TRAITS } from "../engine/players.js";
 import { randomSeed } from "../engine/rng.js";
@@ -62,7 +84,7 @@ const signed = (n) => (n > 0 ? `+${n}` : String(n));
 
 const ui = {
   /** @type {League | null} */ league: null,
-  /** 直前に回したシーズン（試合の結果。セーブには入れない） @type {SeasonResult[] | null} */ seasons: null,
+  /** 直前に回した試合の結果（部ごとの節の並び。セーブには入れない） @type {import("../engine/match.js").MatchResult[][][] | null} */ rounds: null,
   div: 0,
   clubId: "",
   busy: false,
@@ -195,11 +217,16 @@ function renderOffice() {
     ),
   );
 
+  if (u.trust <= FIRE_TRUST + 20 && !u.fired) owner.append(el("p", "neg", "信頼が低くなっています。このままではクビになります"));
   /** @type {HTMLElement[]} */
-  const nodes = [head];
-  const offers = offersCard();
+  const nodes = [];
+  if (u.fired) nodes.push(firedCard());
+  nodes.push(head);
+  const offers = u.fired ? null : offersCard();
   if (offers) nodes.push(offers);
-  nodes.push(owner, u.auto ? budget : wagesCard(), facilitiesCard());
+  nodes.push(owner, managerCard());
+  if (!inWinter()) nodes.push(u.auto ? budget : wagesCard());
+  nodes.push(ticketCard(), facilitiesCard());
   if (f.last) {
     const m = f.last;
     const money = el("div", "card");
@@ -240,6 +267,7 @@ async function act(change, done) {
     return;
   }
   renderAll();
+  setBusy(false);
   if (done) $("status").textContent = done;
   await save();
 }
@@ -267,6 +295,109 @@ function facilitiesCard() {
     el("p", "sub", `維持費 年 ${oku(facilityUpkeep(f))}`),
   );
   return card;
+}
+
+/** 監督のカード: 今の監督と、雇える候補 */
+function managerCard() {
+  const u = /** @type {NonNullable<League["user"]>} */ (L().user);
+  const club = L().clubs[u.clubId];
+  const m = club.manager;
+  const card = el("div", "card");
+  card.append(
+    el("h2", "", "監督"),
+    el("p", "", `${m.name}（${m.age} 歳）`),
+    el("p", "sub", `型 ${STYLES[m.style].label}（${STYLES[m.style].formation}）・采配 ${grade(m.ability)} ${m.ability}・年俸 ${oku(managerWage(m))}`),
+  );
+  if (u.candidates.length === 0) {
+    card.append(el("p", "sub", "雇える監督の候補は、シーズンが終わると出てきます。"));
+    return card;
+  }
+  card.append(el("p", "sub", `交代するなら、今の監督に違約金 ${oku(sackCost(L()))} を払います。夏と冬にできます。`));
+  u.candidates.forEach((c, i) => {
+    const line = el("div", "fac");
+    const text = el("div");
+    text.append(el("p", "", `${c.name}（${c.age} 歳）`), el("p", "sub", `${STYLES[c.style].label}・采配 ${grade(c.ability)} ${c.ability}・年俸 ${oku(managerWage(c))}`));
+    const b = el("button", "secondary small", "雇う");
+    b.addEventListener("click", () => {
+      if (confirm(`${m.name} を解任して、${c.name} を雇いますか？（違約金 ${oku(sackCost(L()))}）`)) act(() => hireManager(L(), i), `${c.name} が監督になりました`);
+    });
+    line.append(text, b);
+    card.append(line);
+  });
+  return card;
+}
+
+/** 入場料のカード */
+function ticketCard() {
+  const u = /** @type {NonNullable<League["user"]>} */ (L().user);
+  const f = L().clubs[u.clubId].finance;
+  const now = f.ticket ?? "normal";
+  const card = el("div", "card");
+  card.append(el("h2", "", "入場料"));
+  const seg = el("div", "seg");
+  for (const level of /** @type {const} */ (["low", "normal", "high"])) {
+    const b = el("button", "", TICKET_LEVELS[level].label);
+    b.setAttribute("aria-pressed", String(now === level));
+    b.addEventListener("click", () => act(() => setTicket(L(), level)));
+    seg.append(b);
+  }
+  const t = TICKET_LEVELS[now];
+  card.append(
+    seg,
+    el("p", "sub", `1 人 ${Math.round(5000 * t.price).toLocaleString()} 円（1 部）・${Math.round(3000 * t.price).toLocaleString()} 円（2 部）。今の観客の見込み 1 試合 ${attendance(f).toLocaleString()} 人`),
+    el("p", "sub", "安いと観客と人気が増え、高いと 1 人あたりの収入は増えるが観客と人気が減る。人気はスポンサーとグッズにも効く。"),
+  );
+  return card;
+}
+
+/** クビになったときのカード */
+function firedCard() {
+  const u = /** @type {NonNullable<League["user"]>} */ (L().user);
+  const card = el("div", "card fired");
+  card.append(
+    el("h2", "", "クビになりました"),
+    el("p", "", `${clubName(u.clubId)} のオーナーに解任されました（${u.fired}）。`),
+    el("p", "sub", "2 部の小さなクラブから声がかかっています。選んだクラブで、もう一度上を目指しましょう。"),
+  );
+  for (const id of u.offers) {
+    const c = L().clubs[id];
+    const line = el("div", "fac");
+    const text = el("div");
+    text.append(el("p", "", c.name), el("p", "sub", `規模 ${grade(c.level)} ${c.level.toFixed(0)}・人気 ${c.finance.popularity.toFixed(0)} 万人・お金 ${oku(c.finance.cash)}`));
+    const b = el("button", "small", "引き受ける");
+    b.addEventListener("click", () => {
+      if (!confirm(`${c.name} の経営者になりますか？`)) return;
+      ui.clubId = id;
+      act(() => acceptOffer(L(), id), `${c.name} の経営者になりました`);
+    });
+    line.append(text, b);
+    card.append(line);
+  }
+  return card;
+}
+
+/** シーズンの途中（冬）か */
+const inWinter = () => L().midSeason !== null && L().midSeason !== undefined;
+
+/**
+ * 冬のあいだの、部の途中の順位表と個人成績
+ * @param {number} div
+ */
+function midTable(div) {
+  const progress = loadProgress(/** @type {NonNullable<League["midSeason"]>} */ (L().midSeason).progress[div]);
+  const rows = standings(progress.table);
+  /** @param {"goals" | "assists"} key @returns {import("../engine/league.js").LeaderRow[]} */
+  const top = (key) =>
+    [...progress.stats.entries()]
+      .filter(([, s]) => s[key] > 0)
+      .sort((a, b) => b[1][key] - a[1][key])
+      .slice(0, 10)
+      .map(([id, s]) => [L().players[id]?.name ?? "", s.club, s[key]]);
+  return {
+    rows: rows.map((r) => /** @type {import("../engine/league.js").TableRow} */ ([r.id, r.won, r.drawn, r.lost, r.goalsFor, r.goalsAgainst])),
+    goals: top("goals"),
+    assists: top("assists"),
+  };
 }
 
 /** 誘いのカード（誘いがあるときだけ） */
@@ -343,6 +474,11 @@ function renderMarket() {
     ),
   );
   nodes.push(mode);
+  if (inWinter()) {
+    const w = el("div", "card mine-card");
+    w.append(el("h2", "", "冬の移籍の時期"), el("p", "sub", "後半の前に、選手を取る・売る・解除する・契約を更新することができます。おまかせの補強と年俸の予算は夏だけです。"));
+    nodes.push(w);
+  }
 
   // 海外からのオファー
   if (u.bids.length) {
@@ -480,7 +616,7 @@ function renderPicker(div) {
       );
       b.addEventListener("click", async () => {
         if (!confirm(`${c.name} の経営者になりますか？`)) return;
-        ui.league = chooseClub(L(), id);
+        ui.league = chooseClub(L(), id, names);
         ui.clubId = id;
         await save();
         showGame();
@@ -509,6 +645,28 @@ function showGame() {
 function renderTable() {
   const rec = lastRecord();
   const tbody = /** @type {HTMLTableSectionElement} */ ($("table").querySelector("tbody"));
+  if (inWinter()) {
+    const rows = midTable(ui.div).rows;
+    tbody.replaceChildren(
+      ...rows.map((r, i) => {
+        const tr = el("tr", r[0] === L().user?.clubId ? "mine" : "");
+        const cells = [i + 1, clubShort(r[0]), r[1] + r[2] + r[3], r[1], r[2], r[3], signed(rowGoalDiff(r)), rowPoints(r)];
+        cells.forEach((v, j) => {
+          const td = el("td", j === 1 ? "club" : "", v);
+          if (j === 1) {
+            const b = el("button", "link", v);
+            b.addEventListener("click", () => openClub(r[0]));
+            td.replaceChildren(b);
+          }
+          tr.append(td);
+        });
+        return tr;
+      }),
+    );
+    $("table-legend").textContent = `${L().year} 年の${L().divisions[ui.div].name}、前半を終えたところ`;
+    $("playoff").replaceChildren();
+    return;
+  }
   if (!rec) {
     tbody.replaceChildren();
     $("table-legend").textContent = "まだシーズンを回していません。「1 年進める」を押してください。";
@@ -563,8 +721,8 @@ function playoffCard(rec) {
 }
 
 function renderLeaders() {
-  const rec = lastRecord();
-  if (!rec) {
+  const rec = /** @type {YearRecord} */ (lastRecord());
+  if (!rec && !inWinter()) {
     $("tab-leaders").replaceChildren(empty("まだシーズンを回していません。"));
     return;
   }
@@ -581,9 +739,9 @@ function renderLeaders() {
     box.append(ol);
     return box;
   };
-  const { goals, assists } = rec.leaders[ui.div];
+  const { goals, assists } = inWinter() ? midTable(ui.div) : rec.leaders[ui.div];
   $("tab-leaders").replaceChildren(
-    el("p", "status", `${rec.year} 年の${L().divisions[ui.div].name}`),
+    el("p", "status", inWinter() ? `${L().year} 年の${L().divisions[ui.div].name}、前半を終えたところ` : `${rec.year} 年の${L().divisions[ui.div].name}`),
     list("得点ランキング", goals, " 点"),
     list("アシストランキング", assists, ""),
   );
@@ -678,14 +836,14 @@ function playerDetail(p) {
 
 function renderRounds() {
   const list = $("round-list");
-  const season = ui.seasons?.[ui.div];
-  if (!season) {
+  const rounds = ui.rounds?.[ui.div];
+  if (!rounds) {
     list.replaceChildren(empty("試合の結果は、このページで進めた直後のシーズンだけ見られます（セーブには入れていません）。"));
     return;
   }
   const players = L().players;
   list.replaceChildren(
-    ...season.rounds.map((round, i) => {
+    ...rounds.map((round, i) => {
       const d = /** @type {HTMLDetailsElement} */ (el("details", "round"));
       d.append(el("summary", "", `第 ${i + 1} 節`));
       for (const m of round) {
@@ -762,9 +920,10 @@ function renderHistory() {
 function renderStatus() {
   const rec = lastRecord();
   const u = L().user;
-  let text = `${L().year} 年のシーズン前（種 ${L().seed}）。`;
+  let text = inWinter() ? `${L().year} 年、冬の移籍の時期（前半が終わったところ）。` : `${L().year} 年のシーズン前（種 ${L().seed}）。`;
   if (u) text += ` あなたのクラブ: ${clubName(u.clubId)}（${L().divisions[divisionOf(L(), u.clubId).div].name}）。`;
-  if (rec) {
+  if (u?.fired) text += " クビになりました。経営タブで次のクラブを選んでください。";
+  if (rec && !inWinter()) {
     text += ` ${rec.year} 年は ${clubName(rec.tables[0][0][0])} が優勝。昇格 ${rec.promoted.map(clubShort).join("・")}、降格 ${rec.relegated.map(clubShort).join("・")}。`;
   }
   $("status").textContent = text;
@@ -772,6 +931,8 @@ function renderStatus() {
 
 function renderAll() {
   renderStatus();
+  $("next1").textContent = inWinter() ? "後半を進める" : "前半を進める";
+  $("next10").textContent = inWinter() ? "後半と、さらに 9 年進める" : "10 年進める";
   renderOffice();
   renderMarket();
   renderClubSelect();
@@ -787,7 +948,9 @@ function renderAll() {
 /** @param {boolean} busy */
 function setBusy(busy) {
   ui.busy = busy;
-  for (const id of ["next1", "next10", "export", "new"]) /** @type {HTMLButtonElement} */ ($(id)).disabled = busy;
+  const fired = Boolean(ui.league?.user?.fired);
+  for (const id of ["next1", "next10"]) /** @type {HTMLButtonElement} */ ($(id)).disabled = busy || fired;
+  for (const id of ["export", "new"]) /** @type {HTMLButtonElement} */ ($(id)).disabled = busy;
   /** @type {HTMLInputElement} */ ($("import")).disabled = busy;
 }
 
@@ -804,13 +967,51 @@ async function save() {
  */
 async function advance(names, years) {
   setBusy(true);
-  for (let i = 0; i < years; i++) {
-    $("status").textContent = `${L().year} 年を回しています…（${i + 1} / ${years}）`;
-    // 画面が固まらないよう、1 年ごとに描画の番を渡す
-    await new Promise((r) => setTimeout(r, 0));
-    const result = playYear(L(), names);
-    ui.league = result.league;
-    ui.seasons = result.seasons;
+  try {
+    // 冬の途中なら、まず後半を終わらせる
+    if (inWinter()) {
+      const first = ui.rounds;
+      const result = playSecondHalf(L(), names);
+      ui.league = result.league;
+      ui.rounds = result.seasons.map((s, i) => [...(first?.[i] ?? []), ...s.rounds]);
+      years--;
+    }
+    for (let i = 0; i < years && !L().user?.fired; i++) {
+      $("status").textContent = `${L().year} 年を回しています…（${i + 1} / ${years}）`;
+      // 画面が固まらないよう、1 年ごとに描画の番を渡す
+      await new Promise((r) => setTimeout(r, 0));
+      const result = playYear(L(), names);
+      ui.league = result.league;
+      ui.rounds = result.seasons.map((s) => s.rounds);
+    }
+  } catch (e) {
+    alert(/** @type {Error} */ (e).message);
+  }
+  renderAll();
+  await save();
+  setBusy(false);
+}
+
+/**
+ * 前半（夏の補強から冬まで）か後半（冬から次の夏まで）を進める
+ * @param {import("../engine/clubs.js").NameData} names
+ */
+async function advanceHalf(names) {
+  setBusy(true);
+  await new Promise((r) => setTimeout(r, 0));
+  try {
+    if (inWinter()) {
+      const first = ui.rounds;
+      const result = playSecondHalf(L(), names);
+      ui.league = result.league;
+      ui.rounds = result.seasons.map((s, i) => [...(first?.[i] ?? []), ...s.rounds]);
+    } else {
+      const result = playFirstHalf(L(), names);
+      ui.league = result.league;
+      ui.rounds = result.rounds;
+    }
+  } catch (e) {
+    alert(/** @type {Error} */ (e).message);
   }
   renderAll();
   await save();
@@ -860,7 +1061,7 @@ async function main() {
   for (const b of document.querySelectorAll("#picker-div button")) {
     b.addEventListener("click", () => renderPicker(Number(/** @type {HTMLElement} */ (b).dataset.div)));
   }
-  $("next1").addEventListener("click", () => advance(names, 1));
+  $("next1").addEventListener("click", () => advanceHalf(names));
   $("next10").addEventListener("click", () => advance(names, 10));
   for (const b of document.querySelectorAll("#tabs button")) {
     b.addEventListener("click", () => showTab(/** @type {string} */ (/** @type {HTMLElement} */ (b).dataset.tab)));
@@ -880,7 +1081,7 @@ async function main() {
     if (!file) return;
     try {
       ui.league = parseSave(await file.text());
-      ui.seasons = null;
+      ui.rounds = null;
       showCurrent();
       await save();
       $("status").textContent += "（読み込みました）";
@@ -893,11 +1094,18 @@ async function main() {
     const input = /** @type {HTMLInputElement} */ ($("seed"));
     const seed = input.value === "" ? randomSeed() : Number(input.value) >>> 0;
     ui.league = createLeague(clubData, names, seed);
-    ui.seasons = null;
+    ui.rounds = null;
     showPicker();
     await save();
   });
   setBusy(false);
+}
+
+// 電波が無くても開けるようにする（https のとき）。手元の開発中は、ファイルを直してもすぐ映るよう、
+// アドレスに ?pwa を付けたときだけ動かす
+const isLocal = ["localhost", "127.0.0.1"].includes(location.hostname);
+if ("serviceWorker" in navigator && (!isLocal || location.search.includes("pwa"))) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
 main().catch((e) => {

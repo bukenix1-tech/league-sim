@@ -3,7 +3,7 @@
 // うまくいかないときは、理由を書いた Error を投げる。選手が足りない位置は、シーズン前に育成の若手で埋まる。
 
 import { contractYearsFor, MAX_SQUAD, newContract, playerValue, STAR_GAP } from "./contracts.js";
-import { facilityCost, FACILITY_MAX, forecastRevenue, STADIUM_MAX, STADIUM_STEP } from "./finance.js";
+import { facilityCost, FACILITY_MAX, forecastRevenue, managerWage, STADIUM_MAX, STADIUM_STEP } from "./finance.js";
 import { divisionOf, squadLevel, withoutContract } from "./offseason.js";
 import { START_TRUST } from "./owner.js";
 import { overall } from "./players.js";
@@ -190,7 +190,42 @@ export function acceptBid(league, playerId) {
 export function acceptOffer(league, clubId) {
   const user = league.user;
   if (!user?.offers.includes(clubId)) throw new Error("その誘いはもうありません");
-  return { ...league, user: { ...user, clubId, budget: null, trust: START_TRUST, offers: [], bids: [] } };
+  return { ...league, user: { ...user, clubId, budget: null, trust: START_TRUST, offers: [], bids: [], fired: null } };
+}
+
+/** 監督を解任するときに払う違約金（今の監督の年俸 1 年分） @param {League} league */
+export const sackCost = (league) => Math.round(managerWage(mine(league).manager) * 10) / 10;
+
+/**
+ * 今の監督を解任して、候補の監督を雇う（夏と冬にできる）。違約金を払う。
+ * @param {League} league @param {number} index 候補の番号
+ * @returns {League}
+ */
+export function hireManager(league, index) {
+  const L = structuredClone(league);
+  const club = mine(L);
+  const user = /** @type {NonNullable<League["user"]>} */ (L.user);
+  const next = user.candidates[index];
+  if (!next) throw new Error("その監督はもういません");
+  const cost = sackCost(L);
+  if (cost > spendLimit(L)) throw new Error(`お金が足りません（違約金 ${cost} 億円）`);
+  club.finance.cash = round1(club.finance.cash - cost);
+  club.finance.transfers = { ...club.finance.transfers, out: club.finance.transfers.out + cost };
+  club.manager = next;
+  // 雇った監督は候補から外れる。解任した監督は候補には戻らない
+  L.user = { ...user, candidates: user.candidates.filter((_, i) => i !== index) };
+  return L;
+}
+
+/**
+ * 入場料の値段を決める（次のシーズンから。冬に変えれば後半の分から効く）。
+ * @param {League} league @param {"low" | "normal" | "high"} ticket
+ * @returns {League}
+ */
+export function setTicket(league, ticket) {
+  const L = structuredClone(league);
+  mine(L).finance.ticket = ticket;
+  return L;
 }
 
 /**

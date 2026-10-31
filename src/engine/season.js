@@ -71,17 +71,52 @@ export function prepareSide(club, available, conditionOf) {
 }
 
 /**
+ * 途中まで進めたシーズン。Map のままではセーブできないので、セーブするときは saveProgress で配列にする。
+ * @typedef {{ table: Map<string, Row>, stats: Map<string, PlayerSeason>, round: number }} SeasonProgress
+ * @typedef {{ table: Row[], stats: [string, PlayerSeason][], round: number }} SavedProgress
+ */
+
+/**
+ * シーズンを始める（まだ 1 節も回していない）
+ * @param {World} world
+ * @returns {SeasonProgress}
+ */
+export function startSeason(world) {
+  return { table: createTable(world.clubs.map((c) => c.id)), stats: new Map(), round: 0 };
+}
+
+/** @param {SeasonProgress} p @returns {SavedProgress} */
+export const saveProgress = (p) => ({ table: [...p.table.values()], stats: [...p.stats.entries()], round: p.round });
+/** @param {SavedProgress} s @returns {SeasonProgress} */
+export const loadProgress = (s) => ({ table: new Map(s.table.map((r) => [r.id, { ...r }])), stats: new Map(s.stats.map(([id, x]) => [id, { ...x }])), round: s.round });
+
+/** シーズンの節の数 @param {World} world */
+export const roundCount = (world) => (world.clubs.length - 1) * 2;
+
+/**
  * 同じ world と seed なら必ず同じ結果になる。world は変えない。
  * @param {World} world @param {number} seed
  * @returns {SeasonResult}
  */
 export function playSeason(world, seed) {
-  const rng = createRng(seed);
-  /** @type {Map<string, PlayerSeason>} */
-  const stats = new Map();
+  const progress = startSeason(world);
+  const rounds = playRounds(world, progress, createRng(seed), roundCount(world));
+  return { seed, rounds, standings: standings(progress.table), stats: progress.stats };
+}
+
+/**
+ * progress の続きから、until 節目の手前まで回す（progress を書きかえる）。
+ * 途中で選手がクラブを移っていても、今いるクラブの選手として数える。
+ * @param {World} world @param {SeasonProgress} progress @param {Rng} rng @param {number} until
+ * @returns {MatchResult[][]}
+ */
+export function playRounds(world, progress, rng, until) {
+  const { stats, table } = progress;
   for (const club of world.clubs) {
     for (const id of club.playerIds) {
-      stats.set(id, { club: club.id, apps: 0, goals: 0, assists: 0, injuries: 0, weeksOut: 0, condition: 100, out: 0 });
+      const s = stats.get(id);
+      if (!s) stats.set(id, { club: club.id, apps: 0, goals: 0, assists: 0, injuries: 0, weeksOut: 0, condition: 100, out: 0 });
+      else if (s.club !== club.id) s.club = club.id;
     }
   }
   const st = (/** @type {string} */ id) => /** @type {PlayerSeason} */ (stats.get(id));
@@ -93,8 +128,9 @@ export function playSeason(world, seed) {
   const prepare = (club) =>
     prepareSide(club, club.playerIds.filter((id) => st(id).out === 0).map(player), conditionOf);
 
-  const table = createTable(world.clubs.map((c) => c.id));
-  const rounds = makeSchedule(world.clubs.map((c) => c.id)).map((fixtures) => {
+  const schedule = makeSchedule(world.clubs.map((c) => c.id)).slice(progress.round, until);
+  progress.round += schedule.length;
+  return schedule.map((fixtures) => {
     // 節の初めに体調が戻り、けがの休みが 1 節減る
     for (const s of stats.values()) {
       s.condition = Math.min(100, s.condition + REST_PER_ROUND);
@@ -125,7 +161,6 @@ export function playSeason(world, seed) {
       return result;
     });
   });
-  return { seed, rounds, standings: standings(table), stats };
 }
 
 /**

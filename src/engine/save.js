@@ -39,6 +39,12 @@ const MIGRATIONS = {
     freeAgents: [],
     user: save.user ? { ...save.user, auto: true, offers: [], bids: [] } : null,
   }),
+  // 版 3 → 4（段階 6）: シーズンの途中（冬）の状態、自分のクラブに監督の候補とクビ、入場料の値段
+  3: (save) => ({
+    ...save,
+    midSeason: null,
+    user: save.user ? { ...save.user, candidates: [], fired: null } : null,
+  }),
 };
 
 /** @param {League} league */
@@ -65,7 +71,7 @@ export function parseSave(text) {
     if (!migrate) throw new Error(`版 ${save.version} のセーブは読めません`);
     save = { ...migrate(save), version: save.version + 1 };
   }
-  for (const key of ["seed", "year", "nextPlayerId", "divisions", "clubs", "players", "history", "user", "freeAgents"]) {
+  for (const key of ["seed", "year", "nextPlayerId", "divisions", "clubs", "players", "history", "user", "freeAgents", "midSeason"]) {
     if (!(key in save)) throw new Error(`セーブに ${key} がありません`);
   }
   return save;

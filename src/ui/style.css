@@ -134,7 +134,7 @@ th { font-size: 0.75rem; color: var(--muted); font-weight: normal; }
 
 #table th:first-child, #table td:first-child { width: 1.8em; text-align: center; }
 #table th:not(.club):not(:first-child) { width: 2.1em; }
-#table th:not(.club):nth-child(7) { width: 2.9em; }
+#table th:not(.club):nth-child(7) { width: 3.3em; }
 #table th:last-child, #table td:last-child { width: 2.6em; padding-right: 4px; font-weight: bold; }
 tr.champ { background: var(--champ); }
 tr.down { background: var(--down); }
@@ -205,3 +205,8 @@ button.small:not(.secondary) { background: var(--accent); color: var(--accent-fg
 .pbody select { min-height: 36px; padding: 4px 8px; }
 .card .seg { margin: 6px 0; }
 .seg button { min-width: 0; }
+
+/* クビ */
+.fired { border-color: var(--g-low); }
+.fired h2 { color: var(--g-low); }
+p.neg { font-weight: bold; font-size: 0.85rem; }

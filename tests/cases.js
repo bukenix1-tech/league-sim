@@ -10,12 +10,12 @@ import { makeSchedule } from "../src/engine/schedule.js";
 import { fatigueLoss, injuryChance, playSeason } from "../src/engine/season.js";
 import { addResult, createTable, goalDiff, points, standings } from "../src/engine/table.js";
 import { generateWorld, makePlayer, SQUAD_SHAPE } from "../src/engine/world.js";
-import { chooseClub, createLeague, playYear, RELEGATED, SAVE_VERSION, seasonGoal, setBudget } from "../src/engine/league.js";
-import { autoBudget, budgetForLevel, budgetRange, initialFinance, levelFromBudget, nextPopularity, revenue, totalRevenue, wage } from "../src/engine/finance.js";
+import { chooseClub, createLeague, playFirstHalf, playSecondHalf, playYear, RELEGATED, SAVE_VERSION, seasonGoal, setBudget } from "../src/engine/league.js";
+import { attendance, autoBudget, budgetForLevel, budgetRange, initialFinance, levelFromBudget, nextPopularity, revenue, totalRevenue, wage } from "../src/engine/finance.js";
 import { evaluate, ownerGoal } from "../src/engine/owner.js";
 import { playerValue } from "../src/engine/contracts.js";
 import { dividend, trainingBonus } from "../src/engine/finance.js";
-import { acceptOffer, buyPlayer, marketList, releaseCost, releasePlayer, renewContract, sellPlayer, setAutoTransfers, upgradeFacility, willJoin } from "../src/engine/market.js";
+import { acceptOffer, buyPlayer, hireManager, marketList, releaseCost, releasePlayer, renewContract, sackCost, sellPlayer, setAutoTransfers, setTicket, spendLimit, upgradeFacility, willJoin } from "../src/engine/market.js";
 import { retireChance } from "../src/engine/offseason.js";
 import { parseSave, serialize } from "../src/engine/save.js";
 
@@ -630,6 +630,116 @@ export function makeCases(clubJson, nameJson) {
         ok(after.freeAgents.length <= 150, `${after.freeAgents.length} 人`);
         const atClubs = new Set(Object.values(after.clubs).flatMap((c) => c.playerIds));
         ok(after.freeAgents.every((id) => after.players[id] && !atClubs.has(id)), "フリーの選手がクラブにもいる");
+      },
+    },
+    {
+      name: "冬: 前半で 1 部は 19 節・2 部は 23 節まで進んで止まり、途中でセーブしても続きは同じ",
+      fn() {
+        const first = playFirstHalf(after, names);
+        eq(first.rounds.map((r) => r.length), [19, 23]);
+        ok(first.league.midSeason, "途中の状態が無い");
+        let threw = false;
+        try { playFirstHalf(first.league, names); } catch { threw = true; }
+        ok(threw, "前半を 2 回回せた");
+        const direct = playSecondHalf(first.league, names);
+        const reloaded = playSecondHalf(parseSave(serialize(first.league)), names);
+        eq(serialize(reloaded.league), serialize(direct.league));
+        eq(serialize(direct.league), serialize(playYear(after, names).league));
+        ok(direct.seasons.every((s) => s.standings.every((r) => r.played === (s.standings.length - 1) * 2)), "全部の試合が終わっていない");
+      },
+    },
+    {
+      name: "冬: 冬に取った選手は後半の試合に出られる",
+      fn() {
+        const mine = chooseClub(after, "ykc", names);
+        const first = playFirstHalf(mine, names);
+        const L = first.league;
+        const entry = marketList(L, "FW", 50).find((e) => e.clubId === null || e.fee < spendLimit(L));
+        ok(entry, "取れる選手がいない");
+        if (!entry) return;
+        const bought = buyPlayer(L, entry.player.id);
+        const { seasons } = playSecondHalf(bought, names);
+        const st = seasons.flatMap((s) => [...s.stats.entries()]).find(([id]) => id === entry.player.id);
+        ok(st && st[1].club === "ykc", "後半の記録が自分のクラブになっていない");
+      },
+    },
+    {
+      name: "監督: シーズンの後に候補が 4 人そろい、雇うと違約金を払って入れ替わる",
+      fn() {
+        const mine = chooseClub(after, "ykc", names);
+        eq(mine.user?.candidates.length, 4);
+        const next = playYear(mine, names).league;
+        eq(next.user?.candidates.length, 4);
+        const L = structuredClone(next);
+        L.clubs.ykc.finance.cash = 100;
+        const cost = sackCost(L);
+        const hired = hireManager(L, 0);
+        eq(hired.clubs.ykc.manager, L.user?.candidates[0]);
+        ok(Math.abs(hired.clubs.ykc.finance.cash - (100 - cost)) < 0.11, "違約金");
+        eq(hired.user?.candidates.length, 3);
+      },
+    },
+    {
+      name: "入場料: 高いと 1 人あたりの収入は増えるが観客が減り、人気も下がっていく",
+      fn() {
+        const f = initialFinance(60);
+        const high = { ...f, ticket: /** @type {const} */ ("high"), capacity: 999999 };
+        const normal = { ...f, capacity: 999999 };
+        ok(attendance(high) < attendance(normal), "観客が減らない");
+        ok(revenue(high, 0, 10, 20).tickets / attendance(high) > revenue(normal, 0, 10, 20).tickets / attendance(normal), "1 人あたりが増えない");
+        ok(nextPopularity(30, 0, 10, 20, "high") < nextPopularity(30, 0, 10, 20, "normal"), "人気が下がらない");
+        const L = setTicket(chooseClub(after, "ykc"), "low");
+        eq(L.clubs.ykc.finance.ticket, "low");
+      },
+    },
+    {
+      name: "クビ: 借金が大きすぎるとクビになり、2 部の小さいクラブ 3 つから声がかかって、移ると続けられる",
+      fn() {
+        const L = structuredClone(chooseClub(after, "nbc", names));
+        L.clubs.nbc.finance.cash = -2000;
+        const next = playYear(L, names).league;
+        ok(next.user?.fired, "クビにならない");
+        eq(next.user?.offers.length, 3);
+        ok(next.user?.offers.every((id) => next.divisions[1].clubIds.includes(id)), "2 部でないクラブから声がかかった");
+        let threw = false;
+        try { playFirstHalf(next, names); } catch { threw = true; }
+        ok(threw, "クビのまま進めた");
+        const moved = acceptOffer(next, /** @type {any} */ (next.user).offers[0]);
+        eq(moved.user?.fired, null);
+        eq(playYear(moved, names).league.year, next.year + 1);
+      },
+    },
+    {
+      name: "セーブ: 版 2（段階 4）と版 3（段階 5）のセーブも読めて、続きから遊べる",
+      fn() {
+        const v3 = JSON.parse(serialize(chooseClub(after, "ykc", names)));
+        v3.version = 3;
+        delete v3.midSeason;
+        delete v3.user.candidates;
+        delete v3.user.fired;
+        const fromV3 = parseSave(JSON.stringify(v3));
+        eq(fromV3.version, SAVE_VERSION);
+        eq(fromV3.midSeason, null);
+        eq(playYear(fromV3, names).league.year, after.year + 1);
+
+        const v2 = structuredClone(v3);
+        v2.version = 2;
+        delete v2.freeAgents;
+        delete v2.user.auto;
+        delete v2.user.offers;
+        delete v2.user.bids;
+        for (const c of Object.values(v2.clubs)) {
+          const club = /** @type {any} */ (c);
+          delete club.form;
+          delete club.finance.facilities;
+          delete club.finance.transfers;
+        }
+        for (const p of Object.values(v2.players)) delete /** @type {any} */ (p).contract;
+        const fromV2 = parseSave(JSON.stringify(v2));
+        eq(fromV2.version, SAVE_VERSION);
+        ok(Object.values(fromV2.players).every((p) => (p.contract?.wage ?? 0) > 0), "契約が足されていない");
+        eq(fromV2.user?.clubId, "ykc");
+        eq(playYear(fromV2, names).league.year, after.year + 1);
       },
     },
   ];
