@@ -2,7 +2,33 @@
 // 画面。計算は src/engine/ にあり、ここでは表示とセーブの出し入れだけをする。
 
 import { parseClubData, parseNameData } from "../engine/clubs.js";
-import { budgetRange, forecastRevenue, levelFromBudget, oku, totalRevenue } from "../engine/finance.js";
+import { contractYearsFor, MAX_SQUAD, newContract, playerValue } from "../engine/contracts.js";
+import {
+  budgetRange,
+  facilityCost,
+  FACILITY_MAX,
+  facilityUpkeep,
+  forecastRevenue,
+  levelFromBudget,
+  oku,
+  STADIUM_MAX,
+  STADIUM_STEP,
+  totalRevenue,
+  trainingBonus,
+} from "../engine/finance.js";
+import {
+  acceptBid,
+  acceptOffer,
+  buyPlayer,
+  marketList,
+  releaseCost,
+  releasePlayer,
+  renewContract,
+  sellPlayer,
+  setAutoTransfers,
+  spendLimit,
+  upgradeFacility,
+} from "../engine/market.js";
 import { AUTO_PROMOTED, chooseClub, createLeague, PLAYOFF_FROM, PLAYOFF_TO, playYear, rowGoalDiff, rowPoints, seasonGoal, setBudget } from "../engine/league.js";
 import { divisionOf, seasonBudget } from "../engine/offseason.js";
 import { ATTR_LABEL, ATTRS, grade, overall, TRAITS } from "../engine/players.js";
@@ -52,7 +78,7 @@ function showTab(tab) {
   for (const b of document.querySelectorAll("#tabs button")) {
     b.setAttribute("aria-selected", String(/** @type {HTMLElement} */ (b).dataset.tab === tab));
   }
-  for (const name of ["office", "table", "leaders", "club", "rounds", "history"]) $(`tab-${name}`).hidden = name !== tab;
+  for (const name of ["office", "market", "table", "leaders", "club", "rounds", "history"]) $(`tab-${name}`).hidden = name !== tab;
   $("div-switch").hidden = !["table", "leaders", "rounds"].includes(tab);
 }
 
@@ -169,7 +195,11 @@ function renderOffice() {
     ),
   );
 
-  const nodes = [head, owner, budget];
+  /** @type {HTMLElement[]} */
+  const nodes = [head];
+  const offers = offersCard();
+  if (offers) nodes.push(offers);
+  nodes.push(owner, u.auto ? budget : wagesCard(), facilitiesCard());
   if (f.last) {
     const m = f.last;
     const money = el("div", "card");
@@ -183,13 +213,254 @@ function renderOffice() {
         ["収入の合計", oku(totalRevenue(m.revenue)), "strong"],
         ["年俸", `−${oku(m.wages)}`],
         ["運営費", `−${oku(m.ops)}`],
+        ["施設の維持費", `−${oku(m.facilities ?? 0)}`],
         ["収支", oku(m.profit), m.profit < 0 ? "neg strong" : "strong"],
+        ["オーナーへの配当", `−${oku(m.dividend ?? 0)}`],
+        ["移籍金（入）", oku(m.transfers?.in ?? 0)],
+        ["移籍金（出）", `−${oku(m.transfers?.out ?? 0)}`],
+        ["施設への投資", `−${oku(m.transfers?.invest ?? 0)}`],
       ]),
+      el("p", "sub", "移籍金と施設への投資は、夏のうちに手元のお金から出し入れしています。配当は、お金が貯まりすぎたときにオーナーが持っていく分です。"),
       el("p", "sub", `観客 1 試合 ${m.attendance.toLocaleString()} 人`),
     );
     nodes.push(money);
   }
   $("tab-office").replaceChildren(...nodes);
+}
+
+/**
+ * 自分のクラブを変える操作をして、うまくいけば描き直してセーブする。だめなら理由を出す。
+ * @param {() => League} change @param {string} [done] うまくいったときに出す言葉
+ */
+async function act(change, done) {
+  try {
+    ui.league = change();
+  } catch (e) {
+    alert(/** @type {Error} */ (e).message);
+    return;
+  }
+  renderAll();
+  if (done) $("status").textContent = done;
+  await save();
+}
+
+/** 施設のカード */
+function facilitiesCard() {
+  const f = L().clubs[/** @type {any} */ (L().user).clubId].finance;
+  const card = el("div", "card");
+  card.append(el("h2", "", "施設"));
+  /** @param {string} label @param {string} now @param {string} effect @param {"stadium" | "training" | "youth"} kind @param {boolean} maxed */
+  const row = (label, now, effect, kind, maxed) => {
+    const line = el("div", "fac");
+    const text = el("div");
+    text.append(el("p", "", `${label} ${now}`), el("p", "sub", effect));
+    const b = el("button", "secondary small", maxed ? "最大" : `上げる ${oku(facilityCost(kind, f))}`);
+    /** @type {HTMLButtonElement} */ (b).disabled = maxed;
+    b.addEventListener("click", () => act(() => upgradeFacility(L(), kind), `${label}を大きくしました`));
+    line.append(text, b);
+    return line;
+  };
+  card.append(
+    row("スタジアム", `${f.capacity.toLocaleString()} 席`, `1 回で ${STADIUM_STEP.toLocaleString()} 席増える。人気が上がって満員になるなら`, "stadium", f.capacity >= STADIUM_MAX),
+    row("練習場", `${f.facilities.training} / ${FACILITY_MAX}`, `選手の伸びが ${Math.round(trainingBonus(f.facilities) * 100)}% よくなる`, "training", f.facilities.training >= FACILITY_MAX),
+    row("育成", `${f.facilities.youth} / ${FACILITY_MAX}`, `育成の若手が強く、伸びしろも大きくなる`, "youth", f.facilities.youth >= FACILITY_MAX),
+    el("p", "sub", `維持費 年 ${oku(facilityUpkeep(f))}`),
+  );
+  return card;
+}
+
+/** 誘いのカード（誘いがあるときだけ） */
+function offersCard() {
+  const u = /** @type {NonNullable<League["user"]>} */ (L().user);
+  if (u.offers.length === 0) return null;
+  const card = el("div", "card mine-card");
+  card.append(el("h2", "", "ほかのクラブから誘われています"), el("p", "sub", "移ると、そのクラブの経営者になります。オーナーの信頼は始めに戻ります。この夏のうちに決めてください。"));
+  for (const id of u.offers) {
+    const c = L().clubs[id];
+    const { div } = divisionOf(L(), id);
+    const line = el("div", "fac");
+    const text = el("div");
+    text.append(el("p", "", c.name), el("p", "sub", `${L().divisions[div].name}・規模 ${grade(c.level)} ${c.level.toFixed(0)}・お金 ${oku(c.finance.cash)}`));
+    const b = el("button", "small", "移る");
+    b.addEventListener("click", () => {
+      if (!confirm(`${c.name} に移りますか？今のクラブには戻れません。`)) return;
+      ui.clubId = id;
+      act(() => acceptOffer(L(), id), `${c.name} の経営者になりました`);
+    });
+    line.append(text, b);
+    card.append(line);
+  }
+  return card;
+}
+
+/** 自分で補強するときの、年俸のカード */
+function wagesCard() {
+  const u = /** @type {NonNullable<League["user"]>} */ (L().user);
+  const club = L().clubs[u.clubId];
+  const { div, n } = divisionOf(L(), club.id);
+  const total = club.playerIds.reduce((s, id) => s + (L().players[id].contract?.wage ?? 0), 0);
+  const rev = forecastRevenue(club.finance, div, n);
+  const card = el("div", "card");
+  card.append(
+    el("h2", "", "年俸（自分で補強中）"),
+    facts([
+      ["選手の年俸の合計", oku(total)],
+      ["収入の見込み", oku(rev)],
+      ["収入に対する割合", `${Math.round((total / rev) * 100)}%`, total / rev > 0.8 ? "neg" : ""],
+    ]),
+    el("p", "sub", "目安は収入の 7 割まで。超えると赤字になりやすい。補強は「移籍」タブで。"),
+  );
+  return card;
+}
+
+/** 移籍タブの位置のしぼりこみ */
+let marketPos = /** @type {import("../engine/players.js").Position | null} */ (null);
+
+function renderMarket() {
+  const u = L().user;
+  if (!u) return;
+  const club = L().clubs[u.clubId];
+  const nodes = [];
+
+  // 補強のやり方
+  const mode = el("div", "card");
+  mode.append(el("h2", "", "補強のやり方"));
+  const seg = el("div", "seg");
+  for (const [auto, label] of /** @type {const} */ ([[true, "おまかせ"], [false, "自分で"]])) {
+    const b = el("button", "", label);
+    b.setAttribute("aria-pressed", String(u.auto === auto));
+    b.addEventListener("click", () => act(() => setAutoTransfers(L(), auto)));
+    seg.append(b);
+  }
+  mode.append(
+    seg,
+    el(
+      "p",
+      "sub",
+      u.auto
+        ? "おまかせ: 夏に、年俸の予算に合わせて自動で補強・放出・契約の更新をします（経営タブの予算で強さが決まる）。下で自分で取ったり売ったりもできます。"
+        : "自分で: 夏の補強・放出・契約の更新は自分でします。契約が 0 年の選手は、更新しないとシーズン前に出ていきます。試合に必要な人数（GK 2・DF 6・MF 6・FW 3）に足りない分だけ、育成の若手が入ります。",
+    ),
+  );
+  nodes.push(mode);
+
+  // 海外からのオファー
+  if (u.bids.length) {
+    const card = el("div", "card mine-card");
+    card.append(el("h2", "", "海外のクラブからのオファー"), el("p", "sub", "受けると移籍金が入り、選手は出ていきます。受けなければ残ります（この夏だけ）。"));
+    for (const bid of u.bids) {
+      const p = L().players[bid.playerId];
+      if (!p) continue;
+      const line = el("div", "fac");
+      const text = el("div");
+      text.append(el("p", "", `${p.name}（${p.pos}・${p.age} 歳・${grade(overall(p))} ${overall(p)}）`), el("p", "sub", `移籍金 ${oku(bid.fee)}`));
+      const b = el("button", "small", "受ける");
+      b.addEventListener("click", () => {
+        if (confirm(`${p.name} を ${oku(bid.fee)} で海外のクラブに売りますか？`)) act(() => acceptBid(L(), bid.playerId), `${p.name} を売りました`);
+      });
+      line.append(text, b);
+      card.append(line);
+    }
+    nodes.push(card);
+  }
+
+  // 自分の選手と契約
+  const squadCard = el("div", "card");
+  squadCard.append(el("h2", "", `自分の選手（${club.playerIds.length} / ${MAX_SQUAD} 人）`));
+  const list = el("ul", "plist");
+  const order = { GK: 0, DF: 1, MF: 2, FW: 3 };
+  const players = club.playerIds.map((id) => L().players[id]).sort((a, b) => order[a.pos] - order[b.pos] || overall(b) - overall(a));
+  for (const p of players) {
+    const c = p.contract;
+    const li = el("li", (c?.years ?? 0) === 0 ? "expiring" : "");
+    const head = el("button", "prow");
+    head.append(
+      el("span", `pos pos-${p.pos}`, p.pos),
+      el("span", "pname", p.name),
+      el("span", "pnum", `${grade(overall(p))} ${overall(p)}`),
+      el("span", "pnum", (c?.years ?? 0) === 0 ? "切れ" : `${c?.years} 年`),
+      el("span", "pnum wide", oku(c?.wage ?? 0)),
+    );
+    const body = el("div", "pbody");
+    body.hidden = true;
+    body.append(playerDetail(p), el("p", "sub", `${p.age} 歳・移籍金の目安 ${oku(playerValue(p))}`));
+    const actions = el("div", "row");
+    const years = /** @type {HTMLSelectElement} */ (el("select"));
+    for (let y = 1; y <= 5; y++) {
+      const o = /** @type {HTMLOptionElement} */ (el("option", "", `${y} 年`));
+      o.value = String(y);
+      if (y === contractYearsFor(p.age)) o.selected = true;
+      years.append(o);
+    }
+    const renew = el("button", "small", `更新（年俸 ${oku(newContract(p).wage)}）`);
+    renew.addEventListener("click", () => act(() => renewContract(L(), p.id, Number(years.value)), `${p.name} と ${years.value} 年の契約をしました`));
+    const sell = el("button", "secondary small", "売る");
+    sell.addEventListener("click", () => {
+      if (!confirm(`${p.name} を売りますか？（移籍金の目安 ${oku(playerValue(p) * 0.9)}）`)) return;
+      act(() => {
+        const r = sellPlayer(L(), p.id);
+        setTimeout(() => ($("status").textContent = `${p.name} を ${clubName(r.buyer)} に ${oku(r.fee)} で売りました`), 0);
+        return r.league;
+      });
+    });
+    const release = el("button", "secondary small", `解除（${oku(releaseCost(p))}）`);
+    release.addEventListener("click", () => {
+      if (confirm(`${p.name} との契約を解除しますか？残りの年俸の半分 ${oku(releaseCost(p))} を払います。`)) act(() => releasePlayer(L(), p.id), `${p.name} を出しました`);
+    });
+    actions.append(years, renew, sell, release);
+    body.append(actions);
+    head.addEventListener("click", () => {
+      body.hidden = !body.hidden;
+    });
+    li.append(head, body);
+    list.append(li);
+  }
+  squadCard.append(el("p", "sub", "左から 位置・名前・総合・契約の残り・年俸。押すと能力と、更新・売る・解除。赤い行は契約が切れた選手"), list);
+  nodes.push(squadCard);
+
+  // 取れる選手
+  const market = el("div", "card");
+  market.append(el("h2", "", "取れる選手"), el("p", "sub", `使えるお金 ${oku(spendLimit(L()))}（手元のお金 + 収入の見込みの 3 割まで借金できる）。クラブの規模を大きく上回る選手は来てくれないので出していません。`));
+  const filter = el("div", "seg");
+  for (const pos of /** @type {const} */ ([null, "GK", "DF", "MF", "FW"])) {
+    const b = el("button", "", pos ?? "全部");
+    b.setAttribute("aria-pressed", String(marketPos === pos));
+    b.addEventListener("click", () => {
+      marketPos = pos;
+      renderMarket();
+    });
+    filter.append(b);
+  }
+  market.append(filter);
+  const mlist = el("ul", "plist");
+  for (const e of marketList(L(), marketPos, 30)) {
+    const p = e.player;
+    const li = el("li");
+    const head = el("button", "prow");
+    head.append(
+      el("span", `pos pos-${p.pos}`, p.pos),
+      el("span", "pname", `${p.name}`),
+      el("span", "pnum", `${grade(overall(p))} ${overall(p)}`),
+      el("span", "pnum", `${p.age} 歳`),
+      el("span", "pnum wide", e.clubId ? oku(e.fee) : "フリー"),
+    );
+    const body = el("div", "pbody");
+    body.hidden = true;
+    body.append(playerDetail(p), el("p", "sub", `${e.clubId ? clubName(e.clubId) : "どこのクラブにもいない（移籍金なし）"}・年俸 ${oku(e.wage)}`));
+    const buy = el("button", "small", e.clubId ? `獲得（移籍金 ${oku(e.fee)}）` : "獲得（移籍金なし）");
+    buy.addEventListener("click", () => {
+      if (confirm(`${p.name} を取りますか？${e.clubId ? `移籍金 ${oku(e.fee)}、` : ""}年俸 ${oku(e.wage)}`)) act(() => buyPlayer(L(), p.id), `${p.name} を取りました`);
+    });
+    body.append(buy);
+    head.addEventListener("click", () => {
+      body.hidden = !body.hidden;
+    });
+    li.append(head, body);
+    mlist.append(li);
+  }
+  market.append(mlist);
+  nodes.push(market);
+  $("tab-market").replaceChildren(...nodes);
 }
 
 /** @param {number} div */
@@ -502,6 +773,7 @@ function renderStatus() {
 function renderAll() {
   renderStatus();
   renderOffice();
+  renderMarket();
   renderClubSelect();
   renderTable();
   renderLeaders();

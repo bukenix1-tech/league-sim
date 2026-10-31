@@ -34,6 +34,8 @@
 }
 
 * { box-sizing: border-box; }
+/* display を決めた要素でも hidden で必ず隠れるように */
+[hidden] { display: none !important; }
 body {
   margin: 0;
   background: var(--bg);
@@ -182,3 +184,24 @@ summary { min-height: 44px; display: flex; align-items: center; cursor: pointer;
 .match .score { font-variant-numeric: tabular-nums; min-width: 3em; text-align: center; font-weight: bold; }
 .match span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scorers { font-size: 0.7rem; color: var(--muted); text-align: center; margin: 0 0 4px; }
+
+/* 施設・誘い・オファーの行 */
+.fac { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.fac > div { min-width: 0; }
+.fac button { flex: 0 0 auto; margin: 0; }
+button.small:not(.secondary) { background: var(--accent); color: var(--accent-fg); border: 0; font-weight: bold; }
+
+/* 移籍: 選手の一覧 */
+.plist { list-style: none; margin: 8px 0 0; padding: 0; }
+.plist li { border-bottom: 1px solid var(--line); }
+.plist li.expiring { background: var(--down); }
+.prow { all: unset; box-sizing: border-box; cursor: pointer; width: 100%; min-height: 44px; display: grid;
+  grid-template-columns: 2.4em minmax(0, 1fr) 3.4em 3em 5.6em; gap: 4px; align-items: center; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.prow:focus-visible { outline: 2px solid var(--accent); }
+.pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pnum { text-align: right; }
+.pbody { padding: 6px 0 10px; }
+.pbody .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.pbody select { min-height: 36px; padding: 4px 8px; }
+.card .seg { margin: 6px 0; }
+.seg button { min-width: 0; }

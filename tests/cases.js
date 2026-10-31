@@ -13,6 +13,9 @@ import { generateWorld, makePlayer, SQUAD_SHAPE } from "../src/engine/world.js";
 import { chooseClub, createLeague, playYear, RELEGATED, SAVE_VERSION, seasonGoal, setBudget } from "../src/engine/league.js";
 import { autoBudget, budgetForLevel, budgetRange, initialFinance, levelFromBudget, nextPopularity, revenue, totalRevenue, wage } from "../src/engine/finance.js";
 import { evaluate, ownerGoal } from "../src/engine/owner.js";
+import { playerValue } from "../src/engine/contracts.js";
+import { dividend, trainingBonus } from "../src/engine/finance.js";
+import { acceptOffer, buyPlayer, marketList, releaseCost, releasePlayer, renewContract, sellPlayer, setAutoTransfers, upgradeFacility, willJoin } from "../src/engine/market.js";
 import { retireChance } from "../src/engine/offseason.js";
 import { parseSave, serialize } from "../src/engine/save.js";
 
@@ -338,7 +341,7 @@ export function makeCases(clubJson, nameJson) {
           eq(perClub.size, 44);
           const ids = Object.values(league.clubs).flatMap((c) => c.playerIds);
           eq(new Set(ids).size, ids.length);
-          eq(Object.keys(league.players).length, ids.length, "選手の表とクラブの選手が合わない");
+          eq(Object.keys(league.players).length, ids.length + league.freeAgents.length, "選手の表とクラブの選手・フリーの選手が合わない");
         }
       },
     },
@@ -350,8 +353,8 @@ export function makeCases(clubJson, nameJson) {
         if (p1) eq(p1.age, p0.age + 1);
         const [o0, o1] = [years[0].record.offseason, years[1].record.offseason];
         ok(o0.retired > 0, "引退が無い");
-        // シーズンの後に引退した分と、シーズン前に放出した分を、シーズン前に補強する
-        eq(o1.joined, o0.retired + o1.released);
+        // シーズンの後に引退した分は、次のシーズン前に補強で埋まる
+        ok(o1.joined >= o0.retired, `補強 ${o1.joined} / 引退 ${o0.retired}`);
         eq(retireChance(30), 0);
         eq(retireChance(40), 1);
       },
@@ -396,17 +399,23 @@ export function makeCases(clubJson, nameJson) {
       },
     },
     {
-      name: "セーブ: 版 1（段階 3）のセーブを読むと、お金が足されて続きから遊べる",
+      name: "セーブ: 版 1（段階 3）のセーブを読むと、お金と契約が足されて続きから遊べる",
       fn() {
         const old = JSON.parse(serialize(after));
         old.version = 1;
         delete old.user;
-        for (const c of Object.values(old.clubs)) delete /** @type {any} */ (c).finance;
+        delete old.freeAgents;
+        for (const c of Object.values(old.clubs)) {
+          delete /** @type {any} */ (c).finance;
+          delete /** @type {any} */ (c).form;
+        }
+        for (const p of Object.values(old.players)) delete /** @type {any} */ (p).contract;
         for (const h of old.history) delete h.user;
         const loaded = parseSave(JSON.stringify(old));
         eq(loaded.version, SAVE_VERSION);
         eq(loaded.user, null);
-        ok(Object.values(loaded.clubs).every((c) => c.finance.popularity > 0), "お金が足されていない");
+        ok(Object.values(loaded.clubs).every((c) => c.finance.popularity > 0 && c.finance.facilities.training >= 1), "お金と施設が足されていない");
+        ok(Object.values(loaded.players).every((p) => (p.contract?.wage ?? 0) > 0), "契約が足されていない");
         eq(playYear(loaded, names).league.year, after.year + 1);
       },
     },
@@ -482,6 +491,145 @@ export function makeCases(clubJson, nameJson) {
         ok(rec && rec.clubId === id && rec.division === 1, "記録が無い");
         ok(rec && Math.abs(rec.budget - max) < 1e-9, "予算が記録と違う");
         eq(seasonGoal(mine, id).maxPos, 18);
+      },
+    },
+    {
+      name: "契約: 始めの契約は 1〜4 年、年俸は力に合う。契約が切れた選手の移籍金は 0、若い選手ほど高い",
+      fn() {
+        for (const p of Object.values(start.players)) {
+          const c = /** @type {import("../src/engine/players.js").Contract} */ (p.contract);
+          ok(c.years >= 1 && c.years <= 4, `${p.name} ${c.years} 年`);
+          ok(Math.abs(c.wage - wage(p)) < 0.06, `${p.name} 年俸 ${c.wage}`);
+        }
+        const p = squad(0)[3];
+        eq(playerValue({ ...p, contract: { years: 0, wage: 1 } }), 0);
+        const young = playerValue({ ...p, age: 21, contract: { years: 3, wage: 1 } });
+        const old = playerValue({ ...p, age: 32, contract: { years: 3, wage: 1 } });
+        ok(young > old, `${young} / ${old}`);
+      },
+    },
+    {
+      name: "契約: シーズン中のクラブの選手には全員契約がある",
+      fn() {
+        for (const c of Object.values(after.clubs)) {
+          for (const id of c.playerIds) ok(after.players[id].contract, `${after.players[id].name} に契約が無い`);
+        }
+      },
+    },
+    {
+      name: "移籍: フリーの選手は移籍金なしで取れ、ほかのクラブの選手は移籍金でお金が動く",
+      fn() {
+        const me = chooseClub(after, "ykc");
+        const free = me.freeAgents.map((id) => me.players[id]).find((p) => willJoin(me, p));
+        if (free) {
+          const L = buyPlayer(me, free.id);
+          ok(L.clubs.ykc.playerIds.includes(free.id), "フリーの選手が入らない");
+          eq(L.clubs.ykc.finance.cash, me.clubs.ykc.finance.cash);
+          ok(!L.freeAgents.includes(free.id), "フリーの一覧に残っている");
+        }
+        const entry = marketList(me, null, 2000).find((e) => e.clubId && e.fee > 0 && e.fee < me.clubs.ykc.finance.cash);
+        ok(entry, "買える選手がいない");
+        if (!entry || !entry.clubId) return;
+        const L = buyPlayer(me, entry.player.id);
+        ok(Math.abs(L.clubs.ykc.finance.cash - (me.clubs.ykc.finance.cash - entry.fee)) < 0.11, "買った側のお金");
+        ok(Math.abs(L.clubs[entry.clubId].finance.cash - (me.clubs[entry.clubId].finance.cash + entry.fee)) < 0.11, "売った側のお金");
+        ok(!L.clubs[entry.clubId].playerIds.includes(entry.player.id), "元のクラブに残っている");
+      },
+    },
+    {
+      name: "移籍: 規模を大きく上回るスターは来ず、契約の更新も断る",
+      fn() {
+        const me = chooseClub(after, "ykc");
+        const star = marketList(me, null, 2000, false).find((e) => !e.willing);
+        ok(star, "来てくれない選手がいない");
+        ok(marketList(me, null, 2000).every((e) => e.willing), "一覧に来てくれない選手が出ている");
+        if (!star) return;
+        let threw = false;
+        try { buyPlayer(me, star.player.id); } catch { threw = true; }
+        ok(threw, "スターが来てしまった");
+        // 自分のクラブにスターがいることにして、更新を断るか見る
+        const L = structuredClone(me);
+        const pid = L.clubs.ykc.playerIds[0];
+        L.players[pid] = { ...L.players[pid], attrs: /** @type {any} */ (Object.fromEntries(Object.keys(L.players[pid].attrs).map((k) => [k, 99]))) };
+        threw = false;
+        try { renewContract(L, pid, 3); } catch { threw = true; }
+        ok(threw, "スターが更新した");
+      },
+    },
+    {
+      name: "移籍: 売ると移籍金が入り、解除すると残りの年俸の半分を払ってフリーになる",
+      fn() {
+        const me = chooseClub(after, "ykc");
+        const pid = me.clubs.ykc.playerIds.find((id) => (me.players[id].contract?.years ?? 0) >= 2);
+        ok(pid, "売れる選手がいない");
+        if (!pid) return;
+        try {
+          const sold = sellPlayer(me, pid);
+          ok(sold.fee > 0 && sold.league.clubs.ykc.finance.cash > me.clubs.ykc.finance.cash, "お金が入らない");
+          ok(sold.league.clubs[sold.buyer].playerIds.includes(pid), "買ったクラブにいない");
+        } catch (e) {
+          ok(String(e).includes("買えるクラブがありません"), String(e));
+        }
+        const cost = releaseCost(me.players[pid]);
+        const released = releasePlayer(me, pid);
+        ok(Math.abs(released.clubs.ykc.finance.cash - (me.clubs.ykc.finance.cash - cost)) < 0.11, "解除のお金");
+        ok(released.freeAgents.includes(pid), "フリーにならない");
+      },
+    },
+    {
+      name: "移籍: 自分で補強すると、夏に 22 人まで勝手に埋まらず、試合に必要な人数だけは若手で埋まる",
+      fn() {
+        let me = setAutoTransfers(chooseClub(after, "ykc"), false);
+        // 何人か出して、少ない人数にする
+        for (const id of me.clubs.ykc.playerIds.slice(0, 6)) me = releasePlayer(me, id);
+        const { seasons } = playYear(me, names);
+        const inSeason = seasons.flatMap((s) => [...s.stats.values()]).filter((st) => st.club === "ykc").length;
+        ok(inSeason < 22, `22 人まで埋まった (${inSeason})`);
+        ok(inSeason >= 17, `試合に必要な人数より少ない (${inSeason})`);
+      },
+    },
+    {
+      name: "施設: 大きくするとお金が減って段階が上がり、スタジアムは席が増える",
+      fn() {
+        const me = structuredClone(chooseClub(after, "nbc"));
+        me.clubs.nbc.finance.cash = 1000;
+        const f = me.clubs.nbc.finance;
+        if (f.facilities.training < 5) {
+          const L = upgradeFacility(me, "training");
+          eq(L.clubs.nbc.finance.facilities.training, f.facilities.training + 1);
+          ok(L.clubs.nbc.finance.cash < f.cash, "お金が減らない");
+        }
+        const S = upgradeFacility(me, "stadium");
+        eq(S.clubs.nbc.finance.capacity, f.capacity + 5000);
+        ok(trainingBonus({ stadium: 1, training: 3, youth: 1 }) > trainingBonus({ stadium: 1, training: 1, youth: 1 }), "練習場が効かない");
+      },
+    },
+    {
+      name: "誘い: 誘ってきたクラブに移ると自分のクラブが変わり、信頼は始めに戻る",
+      fn() {
+        const me = chooseClub(after, "ykc");
+        const withOffer = { ...me, user: { .../** @type {any} */ (me.user), offers: ["nbc"], trust: 90 } };
+        const moved = acceptOffer(withOffer, "nbc");
+        eq(moved.user?.clubId, "nbc");
+        eq(moved.user?.trust, 60);
+        let threw = false;
+        try { acceptOffer(me, "nbc"); } catch { threw = true; }
+        ok(threw, "誘われていないのに移れた");
+      },
+    },
+    {
+      name: "お金: 手元のお金が収入の 1.5 倍を超えた分だけ配当が出る",
+      fn() {
+        eq(dividend(100, 100), 0);
+        ok(Math.abs(dividend(250, 100) - 30) < 1e-9, `${dividend(250, 100)}`);
+      },
+    },
+    {
+      name: "何年も: フリーの選手は増えすぎず、クラブと重ならない",
+      fn() {
+        ok(after.freeAgents.length <= 150, `${after.freeAgents.length} 人`);
+        const atClubs = new Set(Object.values(after.clubs).flatMap((c) => c.playerIds));
+        ok(after.freeAgents.every((id) => after.players[id] && !atClubs.has(id)), "フリーの選手がクラブにもいる");
       },
     },
   ];

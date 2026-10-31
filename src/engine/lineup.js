@@ -38,10 +38,13 @@ const DEFENSE_VALUE = /** @type {Record<Position, Partial<Attrs>>} */ ({
   FW: { def: 0.5, sta: 0.5 },
 });
 
+/** 監督の采配が 1 違うと、攻撃力・守備力が何倍になるか (exp の係数) */
+export const COACH_SCALE = 0.006;
+
 /** 能力の評価がこの値のとき、攻撃力・守備力が 1.0（リーグの平均くらい） */
 export const RATING_REF = 66;
 /** 能力の評価が 1 違うと、攻撃力・守備力が何倍になるか (exp の係数) */
-export const RATING_SCALE = 0.03;
+export const RATING_SCALE = 0.032;
 
 /**
  * 疲れによる能力の下がり方。体調 100 で 1.0、0 で 0.8。
@@ -93,11 +96,11 @@ export function pickLineup(available, conditionOf, formation) {
 }
 
 /**
- * 先発・体調・監督から、試合での攻撃力と守備力を出す。
- * @param {Slot[]} lineup @param {(p: Player) => number} conditionOf @param {Manager} manager
+ * 先発・体調・監督・その年の調子から、試合での攻撃力と守備力を出す。
+ * @param {Slot[]} lineup @param {(p: Player) => number} conditionOf @param {Manager} manager @param {number} [form] その年の調子（1 が普通）
  * @returns {Strength}
  */
-export function teamStrength(lineup, conditionOf, manager) {
+export function teamStrength(lineup, conditionOf, manager, form = 1) {
   /** @param {Record<Position, number>} share @param {Record<Position, Partial<Attrs>>} values */
   const rate = (share, values) => {
     let total = 0;
@@ -116,12 +119,12 @@ export function teamStrength(lineup, conditionOf, manager) {
   const attackRating = rate(ATTACK_SHARE, ATTACK_VALUE);
   const defenseRating = rate(DEFENSE_SHARE, DEFENSE_VALUE);
   const style = STYLES[manager.style];
-  // 監督の采配の力は ±5% くらい効く
-  const coach = Math.exp((manager.ability - 65) * 0.003);
+  // 監督の采配の力は ±10% くらい効く
+  const coach = Math.exp((manager.ability - 65) * COACH_SCALE);
   return {
     attackRating,
     defenseRating,
-    attack: Math.exp((attackRating - RATING_REF) * RATING_SCALE) * style.attack * coach,
-    defense: Math.exp((defenseRating - RATING_REF) * RATING_SCALE) * style.defense * coach,
+    attack: Math.exp((attackRating - RATING_REF) * RATING_SCALE) * style.attack * coach * form,
+    defense: Math.exp((defenseRating - RATING_REF) * RATING_SCALE) * style.defense * coach * form,
   };
 }

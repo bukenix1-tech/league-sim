@@ -1,9 +1,10 @@
 // @ts-check
 // 何年も続くリーグ: 1 部と 2 部、プレーオフ、昇格と降格、お金と人気、自分のクラブ、シーズンの記録。
 
-import { attendance, initialFinance, managerWage, nextPopularity, opsCost, PARACHUTE_YEARS, revenue, totalRevenue, wage } from "./finance.js";
+import { initialContract, playerValue } from "./contracts.js";
+import { attendance, dividend, facilityUpkeep, initialFinance, managerWage, nextPopularity, opsCost, PARACHUTE_YEARS, revenue, totalRevenue } from "./finance.js";
 import { playMatch } from "./match.js";
-import { divisionOf, emptyCareer, emptyReport, runOffseason, runPreseason } from "./offseason.js";
+import { ABROAD_FEE, abroadChance, divisionOf, SACK_GAP, emptyCareer, emptyReport, runOffseason, runPreseason } from "./offseason.js";
 import { evaluate, ownerGoal, START_TRUST } from "./owner.js";
 import { createRng } from "./rng.js";
 import { leaders, playSeason, prepareSide } from "./season.js";
@@ -21,8 +22,10 @@ import { generateWorld } from "./world.js";
  * @typedef {import("./offseason.js").LeagueClub} LeagueClub
  * @typedef {import("./finance.js").SeasonMoney} SeasonMoney
  * @typedef {import("./owner.js").Evaluation} Evaluation
- * @typedef {{ clubId: string, budget: number | null, trust: number }} UserState
- *   budget は自分で決めた年俸の予算（null はおまかせ）、trust はオーナーの信頼 (0〜100)
+ * @typedef {{ playerId: string, fee: number }} Bid  海外のクラブからの、自分のクラブの選手へのオファー
+ * @typedef {{ clubId: string, budget: number | null, trust: number, auto: boolean, offers: string[], bids: Bid[] }} UserState
+ *   budget は自分で決めた年俸の予算（null はおまかせ）、trust はオーナーの信頼 (0〜100)、
+ *   auto は補強をおまかせにするか、offers は誘ってきたクラブ、bids は届いているオファー（どちらもこの夏だけ）
  * @typedef {{ clubId: string, division: number, evaluation: Evaluation, budget: number, money: SeasonMoney,
  *             cash: number, popularity: number }} UserRecord
  * @typedef {[id: string, won: number, drawn: number, lost: number, goalsFor: number, goalsAgainst: number]} TableRow
@@ -35,12 +38,18 @@ import { generateWorld } from "./world.js";
  * @typedef {{ id: string, name: string, clubIds: string[] }} DivisionState
  * @typedef {{ version: number, seed: number, year: number, nextPlayerId: number, divisions: DivisionState[],
  *             clubs: Record<string, LeagueClub>, players: Record<string, Player>, history: YearRecord[],
- *             user: UserState | null }} League
+ *             user: UserState | null, freeAgents: string[] }} League
  */
 
 /** セーブの形の版。形を変えたら上げて、save.js に古い版を読む手順を足す */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 export const START_YEAR = 2026;
+
+/** オーナーの信頼がこれ以上で目標を達成すると、別のクラブから誘われることがある */
+export const OFFER_TRUST = 70;
+
+/** 優勝したクラブの選手の年俸が何倍になるか */
+export const CHAMPION_RAISE = 1.15;
 
 /** 1 部の下から何クラブが降格するか。2 部からは上位 2 クラブ + プレーオフの勝者が昇格する */
 export const RELEGATED = 3;
@@ -68,19 +77,21 @@ export function yearSeed(seed, year, k) {
 export function createLeague(clubData, names, seed) {
   const all = clubData.divisions.flatMap((d) => d.clubs);
   const world = generateWorld(all, names, seed);
+  const rng = createRng(yearSeed(seed, 0, 77));
   /** @type {Record<string, Player>} */
   const players = {};
-  for (const [id, p] of world.players) players[id] = { ...p, career: emptyCareer() };
+  for (const [id, p] of world.players) players[id] = { ...p, career: emptyCareer(), contract: initialContract(rng, p) };
   return {
     version: SAVE_VERSION,
     seed,
     year: START_YEAR,
     nextPlayerId: 1,
     divisions: clubData.divisions.map((d) => ({ id: d.id, name: d.name, clubIds: d.clubs.map((c) => c.id) })),
-    clubs: Object.fromEntries(world.clubs.map((c) => [c.id, { ...c, finance: initialFinance(c.level) }])),
+    clubs: Object.fromEntries(world.clubs.map((c) => [c.id, { ...c, finance: initialFinance(c.level), form: 1 }])),
     players,
     history: [],
     user: null,
+    freeAgents: [],
   };
 }
 
@@ -91,7 +102,7 @@ export function createLeague(clubData, names, seed) {
  */
 export function chooseClub(league, clubId) {
   if (!league.clubs[clubId]) throw new Error(`クラブがありません: ${clubId}`);
-  return { ...league, user: { clubId, budget: null, trust: START_TRUST } };
+  return { ...league, user: { clubId, budget: null, trust: START_TRUST, auto: true, offers: [], bids: [] } };
 }
 
 /**
@@ -169,6 +180,8 @@ export function playYear(league, names) {
   const rng = createRng(yearSeed(L.seed, L.year, 99));
   const report = emptyReport();
   const goal = L.user ? seasonGoal(L, L.user.clubId) : null;
+  // 誘いとオファーはその夏だけ
+  if (L.user) L.user = { ...L.user, offers: [], bids: [] };
 
   // シーズン前: 予算・補強
   runPreseason(L, names, rng, report);
@@ -222,11 +235,20 @@ export function playYear(league, names) {
       const f = club.finance;
       const rev = revenue(f, div, i + 1, n);
       const total = totalRevenue(rev);
-      const wages = club.playerIds.reduce((sum, id) => sum + wage(L.players[id]), 0) + managerWage(club.manager);
+      const wages = club.playerIds.reduce((sum, id) => sum + (L.players[id].contract?.wage ?? 0), 0) + managerWage(club.manager);
       const ops = opsCost(total);
-      const profit = total - wages - ops;
-      const money = { revenue: rev, wages, ops, profit, attendance: attendance(f) };
-      club.finance = { ...f, cash: Math.round((f.cash + profit) * 10) / 10, popularity: nextPopularity(f.popularity, div, i + 1, n), last: money };
+      const upkeep = facilityUpkeep(f);
+      // 移籍金と施設に使ったお金は、夏のうちに手元のお金から出し入れ済み。収支の表には並べて出す
+      const profit = total - wages - ops - upkeep;
+      const paid = dividend(f.cash + profit, total);
+      const money = { revenue: rev, wages, ops, facilities: upkeep, transfers: f.transfers, profit, dividend: paid, attendance: attendance(f) };
+      club.finance = {
+        ...f,
+        cash: Math.round((f.cash + profit - paid) * 10) / 10,
+        popularity: nextPopularity(f.popularity, div, i + 1, n),
+        transfers: { in: 0, out: 0, invest: 0 },
+        last: money,
+      };
     });
   });
 
@@ -237,8 +259,22 @@ export function playYear(league, names) {
     const pos = seasons[div].standings.findIndex((r) => r.id === id) + 1;
     const evaluation = evaluate(goal, pos, L.user.trust);
     const f = L.clubs[id].finance;
-    L.user = { ...L.user, trust: evaluation.trust };
+    // 成績が良いと、もっと大きいクラブから誘われる（2 つまで）
+    const mine = L.clubs[id];
+    /** @type {string[]} */
+    const offers = [];
+    if (evaluation.achieved && evaluation.trust >= OFFER_TRUST) {
+      const bigger = Object.values(L.clubs).filter((c) => c.id !== id && c.level > mine.level + 3 && c.level < mine.level + 20);
+      while (bigger.length && offers.length < 2) offers.push(bigger.splice(Math.floor(rng.next() * bigger.length), 1)[0].id);
+    }
+    L.user = { ...L.user, trust: evaluation.trust, offers };
     record.user = { clubId: id, division: div, evaluation, budget: f.budget, money: /** @type {SeasonMoney} */ (f.last), cash: f.cash, popularity: f.popularity };
+  }
+
+  // 優勝したクラブの選手は年俸が上がる（優勝の手当てと、契約の見直し）
+  for (const id of L.clubs[top[0].id].playerIds) {
+    const c = L.players[id].contract;
+    if (c) L.players[id] = { ...L.players[id], contract: { ...c, wage: Math.round(c.wage * CHAMPION_RAISE * 10) / 10 } };
   }
 
   // 降格したクラブは 2 年間パラシュートをもらう。ほかは 1 年ずつ減る
@@ -250,8 +286,30 @@ export function playYear(league, names) {
   L.divisions[0].clubIds = [...L.divisions[0].clubIds.filter((id) => !relegated.includes(id)), ...promoted];
   L.divisions[1].clubIds = [...L.divisions[1].clubIds.filter((id) => !promoted.includes(id)), ...relegated];
 
+  // 期待（部の中でのクラブの規模の順位）よりずっと下で終わったクラブ
+  /** @type {Set<string>} */
+  const disappointing = new Set();
+  seasons.forEach((s) => {
+    const byLevel = [...s.standings].sort((a, b) => L.clubs[b.id].level - L.clubs[a.id].level).map((r) => r.id);
+    s.standings.forEach((r, i) => {
+      if (i - byLevel.indexOf(r.id) >= SACK_GAP) disappointing.add(r.id);
+    });
+  });
+
   // シーズンの後: 年を取る・引退・監督の交代
-  runOffseason(L, names, rng, report);
+  runOffseason(L, names, rng, report, disappointing);
+
+  // 自分のクラブのうまい選手に、海外のクラブからオファーが届く（受けるかは夏に決める）
+  if (L.user) {
+    const club = L.clubs[L.user.clubId];
+    /** @type {Bid[]} */
+    const bids = [];
+    for (const pid of club.playerIds) {
+      const p = L.players[pid];
+      if (rng.next() < abroadChance(p) && playerValue(p) > 0) bids.push({ playerId: pid, fee: Math.round(playerValue(p) * ABROAD_FEE * 10) / 10 });
+    }
+    L.user = { ...L.user, bids };
+  }
   L.history.push(record);
   L.year++;
   return { league: L, seasons, record };

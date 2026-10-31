@@ -1,7 +1,7 @@
 // @ts-check
 // セーブの書き出しと読み込み。版の番号を見て、古い形なら今の形に直してから使う。
 
-import { initialFinance } from "./finance.js";
+import { initialFinance, initialFacilities, wage } from "./finance.js";
 import { SAVE_VERSION } from "./league.js";
 
 /** @typedef {import("./league.js").League} League */
@@ -20,6 +20,24 @@ const MIGRATIONS = {
     ),
     history: save.history.map((/** @type {any} */ h) => ({ ...h, user: null })),
     user: null,
+  }),
+  // 版 2 → 3（段階 5）: 選手に契約、クラブに施設・移籍金の出入り・調子、フリーの選手、自分のクラブに補強のおまかせ・誘い・オファー
+  2: (save) => ({
+    ...save,
+    players: Object.fromEntries(
+      Object.entries(save.players).map(([id, p], i) => [
+        id,
+        { .../** @type {object} */ (p), contract: { years: 1 + (i % 4), wage: Math.round(wage(/** @type {any} */ (p)) * 10) / 10 } },
+      ]),
+    ),
+    clubs: Object.fromEntries(
+      Object.entries(save.clubs).map(([id, c]) => {
+        const club = /** @type {any} */ (c);
+        return [id, { ...club, form: 1, finance: { ...club.finance, facilities: initialFacilities(club.level), transfers: { in: 0, out: 0, invest: 0 } } }];
+      }),
+    ),
+    freeAgents: [],
+    user: save.user ? { ...save.user, auto: true, offers: [], bids: [] } : null,
   }),
 };
 
@@ -47,7 +65,7 @@ export function parseSave(text) {
     if (!migrate) throw new Error(`版 ${save.version} のセーブは読めません`);
     save = { ...migrate(save), version: save.version + 1 };
   }
-  for (const key of ["seed", "year", "nextPlayerId", "divisions", "clubs", "players", "history", "user"]) {
+  for (const key of ["seed", "year", "nextPlayerId", "divisions", "clubs", "players", "history", "user", "freeAgents"]) {
     if (!(key in save)) throw new Error(`セーブに ${key} がありません`);
   }
   return save;

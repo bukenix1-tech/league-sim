@@ -66,7 +66,8 @@ export function injuryLength(rng) {
  */
 export function prepareSide(club, available, conditionOf) {
   const lineup = pickLineup(available, conditionOf, STYLES[club.manager.style].formation);
-  return { id: club.id, lineup, side: teamStrength(lineup, conditionOf, club.manager) };
+  const form = /** @type {{ form?: number }} */ (club).form ?? 1;
+  return { id: club.id, lineup, side: teamStrength(lineup, conditionOf, club.manager, form) };
 }
 
 /**

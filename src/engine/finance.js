@@ -8,8 +8,12 @@ import { overall } from "./players.js";
  * @typedef {import("./players.js").Player} Player
  * @typedef {import("./world.js").Manager} Manager
  * @typedef {{ tickets: number, tv: number, sponsor: number, goods: number }} Revenue
- * @typedef {{ revenue: Revenue, wages: number, ops: number, profit: number, attendance: number }} SeasonMoney
- * @typedef {{ cash: number, popularity: number, capacity: number, budget: number, parachute: number, last: SeasonMoney | null }} Finance
+ * @typedef {{ stadium: number, training: number, youth: number }} Facilities  それぞれ 1〜5
+ * @typedef {{ in: number, out: number, invest?: number }} Transfers  移籍金の入りと出、施設に使ったお金（シーズンの間にたまり、シーズンの収支に入る）
+ * @typedef {{ revenue: Revenue, wages: number, ops: number, facilities: number, transfers: Transfers, profit: number,
+ *             dividend: number, attendance: number }} SeasonMoney  profit は配当の前
+ * @typedef {{ cash: number, popularity: number, capacity: number, budget: number, parachute: number,
+ *             facilities: Facilities, transfers: Transfers, last: SeasonMoney | null }} Finance
  *   cash は手元のお金（マイナスは借金）、popularity はファンの数（万人）、capacity はスタジアムの席の数、
  *   budget はこのシーズンの年俸の予算、parachute は降格したあと放映権を多めにもらえる残りの年数
  */
@@ -21,21 +25,35 @@ export const WAGE_BASE = 3;
 export const WAGE_EXP = 0.06;
 /** 22 人の年俸の合計が「規模の選手 22 人分」の何倍になるか（主力と控えの差の分。測って決めた値） */
 export const SQUAD_WAGE_FACTOR = 1.0;
+/** この総合力を超えるスター選手は、強さの割に年俸が急に高くなる */
+export const STAR_WAGE_FROM = 78;
+export const STAR_WAGE_CURVE = 0.004;
+
+/** 総合力から年俸の倍率（総合力 60 で 1） @param {number} ov */
+export const wageFactor = (ov) => Math.exp((ov - 60) * WAGE_EXP + STAR_WAGE_CURVE * Math.max(0, ov - STAR_WAGE_FROM) ** 2);
 
 /** @param {Player} p */
-export const wage = (p) => WAGE_BASE * Math.exp((overall(p) - 60) * WAGE_EXP);
+export const wage = (p) => WAGE_BASE * wageFactor(overall(p));
 
 /** @param {Manager} m */
 export const managerWage = (m) => 1.5 * Math.exp((m.ability - 60) * 0.04);
 
 /** 年俸の予算から、補強で目指せるクラブの規模 @param {number} budget */
 export function levelFromBudget(budget) {
-  return 60 + Math.log(Math.max(1, budget) / (22 * WAGE_BASE * SQUAD_WAGE_FACTOR)) / WAGE_EXP;
+  // budgetForLevel は単調に増えるので、二分法で逆に解く
+  let lo = 20;
+  let hi = 99;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (budgetForLevel(mid) < budget) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
 }
 
 /** クラブの規模に見合う年俸の合計 @param {number} level */
 export function budgetForLevel(level) {
-  return 22 * WAGE_BASE * SQUAD_WAGE_FACTOR * Math.exp((level - 60) * WAGE_EXP);
+  return 22 * WAGE_BASE * SQUAD_WAGE_FACTOR * wageFactor(level);
 }
 
 // ── 入るお金 ──
@@ -49,6 +67,19 @@ export const TICKET_PRICE = [5000, 3000];
 export function tvMoney(div, pos, n) {
   return div === 0 ? 20 + (n - pos) * 1.0 : 14 + (n - pos) * 0.4;
 }
+
+/** 人気がスポンサーとグッズに効く度合い（1 に近いほど人気のあるクラブがもうかる） */
+export const POPULARITY_EXP = 0.7;
+
+/** 手元のお金が収入のこの倍を超えたら、超えた分の一部をオーナーが配当として持っていく */
+export const DIVIDEND_FROM = 1.5;
+export const DIVIDEND_RATE = 0.3;
+
+/**
+ * オーナーへの配当（億円）
+ * @param {number} cash @param {number} rev
+ */
+export const dividend = (cash, rev) => Math.max(0, cash - rev * DIVIDEND_FROM) * DIVIDEND_RATE;
 
 /** 降格したクラブが 2 部で 2 年間もらえる上乗せの放映権（パラシュート。本物のリーグにもある） */
 export const PARACHUTE = 12;
@@ -68,8 +99,8 @@ export function revenue(f, div, pos, n) {
   return {
     tickets: (attendance(f) * TICKET_PRICE[div] * homeGames) / 1e8,
     tv: tvMoney(div, pos, n) + (div === 1 && f.parachute > 0 ? PARACHUTE : 0),
-    sponsor: 2 * f.popularity ** 0.8,
-    goods: 0.8 * f.popularity ** 0.8,
+    sponsor: 2.6 * f.popularity ** POPULARITY_EXP,
+    goods: 1.0 * f.popularity ** POPULARITY_EXP,
   };
 }
 
@@ -79,13 +110,44 @@ export const totalRevenue = (r) => r.tickets + r.tv + r.sponsor + r.goods;
 /** 運営費（スタッフ・施設の維持など） @param {number} rev */
 export const opsCost = (rev) => 2 + rev * 0.08;
 
+// ── 施設 ──
+export const FACILITY_MAX = 5;
+/** スタジアムを 1 回広げると増える席の数と、その費用（億円）と、席の上限 */
+export const STADIUM_STEP = 5000;
+export const STADIUM_COST = 25;
+export const STADIUM_MAX = 90000;
+
+/**
+ * 施設を 1 つ上げる費用（億円）
+ * @param {"stadium" | "training" | "youth"} kind @param {Finance} f
+ */
+export function facilityCost(kind, f) {
+  if (kind === "stadium") return STADIUM_COST;
+  return 15 * (f.facilities[kind] + 1);
+}
+
+/** 施設の毎年の維持費（億円） @param {Finance} f */
+export const facilityUpkeep = (f) => f.capacity / 20000 + f.facilities.training + f.facilities.youth;
+
+/** 練習場による、選手の伸びの上乗せ（0 で普通、0.1 で 1 割増し） @param {Facilities} fac */
+export const trainingBonus = (fac) => 0.1 * (fac.training - 1);
+
+/** 育成の施設による、若手の強さの上乗せと、伸びしろの倍率 @param {Facilities} fac */
+export const youthBonus = (fac) => ({ base: 2 * (fac.youth - 1), room: 1 + 0.15 * (fac.youth - 1) });
+
+/** クラブの規模から始めの施設 @param {number} level @returns {Facilities} */
+export function initialFacilities(level) {
+  const lv = level >= 75 ? 4 : level >= 65 ? 3 : level >= 55 ? 2 : 1;
+  return { stadium: 1, training: lv, youth: lv };
+}
+
 // ── 人気 ──
 /**
  * 順位から、人気が向かっていく先（万人）。人気は毎年少しずつしか動かない。
  * @param {number} div @param {number} pos @param {number} n
  */
 export function popularityTarget(div, pos, n) {
-  return div === 0 ? 18 * Math.exp((n - pos) * 0.11) : 5 * Math.exp((n - pos) * 0.06);
+  return div === 0 ? 25 + 60 * Math.exp(-(pos - 1) * 0.25) : 5 * Math.exp((n - pos) * 0.06);
 }
 export const POPULARITY_PULL = 0.12;
 
@@ -108,7 +170,16 @@ export function initialFinance(level) {
   const att = 4000 * popularity ** 0.55;
   const capacity = Math.max(8000, Math.ceil((att * 1.2) / 1000) * 1000);
   const budget = budgetForLevel(level);
-  return { cash: Math.round(budget * 0.5), popularity, capacity, budget, parachute: 0, last: null };
+  return {
+    cash: Math.round(budget * 0.5),
+    popularity,
+    capacity,
+    budget,
+    parachute: 0,
+    facilities: initialFacilities(level),
+    transfers: { in: 0, out: 0 },
+    last: null,
+  };
 }
 
 /**
