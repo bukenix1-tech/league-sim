@@ -1,6 +1,7 @@
 // @ts-check
 // 何年も続くリーグ: 1 部と 2 部、プレーオフ、昇格と降格、お金と人気、自分のクラブ、シーズンの記録。
 
+import { refreshAbroad } from "./abroad.js";
 import { initialContract, playerValue } from "./contracts.js";
 import { attendance, dividend, facilityUpkeep, forecastRevenue, initialFinance, managerWage, nextPopularity, opsCost, PARACHUTE_YEARS, revenue, totalRevenue } from "./finance.js";
 import { playMatch } from "./match.js";
@@ -43,11 +44,12 @@ import { generateWorld, makeManager } from "./world.js";
  * @typedef {{ id: string, name: string, clubIds: string[] }} DivisionState
  * @typedef {{ version: number, seed: number, year: number, nextPlayerId: number, divisions: DivisionState[],
  *             clubs: Record<string, LeagueClub>, players: Record<string, Player>, history: YearRecord[],
- *             user: UserState | null, freeAgents: string[], midSeason: MidSeason | null }} League
+ *             user: UserState | null, freeAgents: string[], midSeason: MidSeason | null, abroad: string[] | null }} League
+ *   abroad は海外の選手の一覧（自分のクラブがあるときだけ）
  */
 
 /** セーブの形の版。形を変えたら上げて、save.js に古い版を読む手順を足す */
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 export const START_YEAR = 2026;
 
 /** オーナーの信頼がこれ以上で目標を達成すると、別のクラブから誘われることがある */
@@ -102,6 +104,7 @@ export function createLeague(clubData, names, seed) {
     user: null,
     freeAgents: [],
     midSeason: null,
+    abroad: null,
   };
 }
 
@@ -117,7 +120,21 @@ export function chooseClub(league, clubId, names) {
   const rng = createRng(yearSeed(league.seed, league.year, 55));
   const level = league.clubs[clubId].level;
   const candidates = names ? [0, 1, 2, 3].map((k) => makeManager(rng, names, used, level - 6 + k * 4)) : [];
-  return { ...league, user: { clubId, budget: null, trust: START_TRUST, auto: true, offers: [], bids: [], candidates, fired: null } };
+  const L = { ...league, user: { clubId, budget: null, trust: START_TRUST, auto: true, offers: [], bids: [], candidates, fired: null } };
+  return names ? ensureAbroad(L, names) : L;
+}
+
+/**
+ * 自分のクラブがあるのに海外の選手の一覧がまだ無ければ作る（古いセーブを読んだときなど）。
+ * league は変えず、新しい League を返す（作る必要が無ければそのまま返す）。
+ * @param {League} league @param {NameData} names
+ * @returns {League}
+ */
+export function ensureAbroad(league, names) {
+  if (!league.user || league.abroad) return league;
+  const L = structuredClone(league);
+  refreshAbroad(L, names, createRng(yearSeed(L.seed, L.year, 78)), false);
+  return L;
 }
 
 /**
@@ -234,15 +251,22 @@ export function playSecondHalf(league, names) {
   });
   L.midSeason = null;
 
-  // 選手の前のシーズンと通算の記録（途中で引退・海外へ出た選手は数えない）
+  // 選手の前のシーズンと通算の記録。冬に別の部のクラブへ移った選手は、両方の部の記録を足す
+  // （途中で引退・海外へ出た選手は数えない）
+  /** @type {Map<string, { apps: number, goals: number, assists: number, injuries: number }>} */
+  const totals = new Map();
   for (const season of seasons) {
     for (const [id, s] of season.stats) {
-      const p = L.players[id];
-      if (!p) continue;
-      p.last = { apps: s.apps, goals: s.goals, assists: s.assists, injuries: s.injuries };
-      const c = p.career ?? emptyCareer();
-      p.career = { seasons: c.seasons + (s.apps > 0 ? 1 : 0), apps: c.apps + s.apps, goals: c.goals + s.goals, assists: c.assists + s.assists };
+      const t = totals.get(id) ?? { apps: 0, goals: 0, assists: 0, injuries: 0 };
+      totals.set(id, { apps: t.apps + s.apps, goals: t.goals + s.goals, assists: t.assists + s.assists, injuries: t.injuries + s.injuries });
     }
+  }
+  for (const [id, s] of totals) {
+    const p = L.players[id];
+    if (!p) continue;
+    p.last = s;
+    const c = p.career ?? emptyCareer();
+    p.career = { seasons: c.seasons + (s.apps > 0 ? 1 : 0), apps: c.apps + s.apps, goals: c.goals + s.goals, assists: c.assists + s.assists };
   }
 
   const [top, second] = seasons.map((s) => s.standings);
@@ -368,6 +392,9 @@ export function playSecondHalf(league, names) {
     }
     L.user = { ...L.user, bids };
   }
+  // 海外の選手の一覧も 1 年進む（乱数は別のものなので、コンピューターのクラブの動きは変わらない）
+  if (L.user) refreshAbroad(L, names, createRng(yearSeed(L.seed, L.year, 77)));
+
   // 自分のクラブが雇える監督（夏と冬に選べる）
   if (L.user) {
     const used = new Set(Object.values(L.clubs).map((c) => c.manager.name));

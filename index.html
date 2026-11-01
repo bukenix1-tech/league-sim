@@ -12,7 +12,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="リーグ">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="stylesheet" href="src/ui/style.css?v=8">
+  <link rel="stylesheet" href="src/ui/style.css?v=9">
 </head>
 <body>
   <header>
@@ -87,6 +87,28 @@
 
     <section id="tab-history" class="panel" hidden></section>
 
+    <details class="card help">
+      <summary>遊び方</summary>
+      <p>あなたはサッカークラブの経営者です。試合の作戦は監督に任せ、お金・選手・監督・施設を決めて、クラブを強くしていきます。</p>
+      <h3>1 年の流れ</h3>
+      <ol class="flow">
+        <li><b>夏（シーズン前）</b>: 選手の獲得・売る・解除・契約の更新（移籍タブ）、年俸の予算・入場料・施設・監督（経営タブ）を決める</li>
+        <li><b>「前半を進める」</b>: シーズンの半分まで試合が進む</li>
+        <li><b>冬</b>: 冬の移籍の時期。けが人や弱い位置を補強する。監督の交代もできる</li>
+        <li><b>「後半を進める」</b>: 残りの試合 → プレーオフ → 昇格と降格 → お金の出入り → オーナーの評価</li>
+        <li><b>シーズンの後</b>: 選手が年を取って伸びる・衰える、引退と新人。次の夏へ</li>
+      </ol>
+      <h3>こつ</h3>
+      <ul>
+        <li>経営タブの一番上の「いまやること」に、その時期にやれることが出ます</li>
+        <li>補強が「おまかせ」なら、年俸の予算を決めるだけで自動で選手が入れかわります。「自分で」にすると、国内・海外・フリーの選手から自分で選べます</li>
+        <li>契約が切れた選手は、夏に更新しないと出ていきます（自分で補強するとき）</li>
+        <li>クラブの規模を大きく上回るスターは来てくれません。勝ってクラブを大きくしましょう</li>
+        <li>オーナーの目標を達成すると信頼が上がり、大きいクラブから誘われることもあります。信頼を失うか借金がふくらむとクビ</li>
+        <li>1 部の下 3 つは 2 部へ降格。2 部の上 2 つとプレーオフの勝者が 1 部へ昇格します</li>
+      </ul>
+    </details>
+
     <details class="card save">
       <summary>セーブ・新しく始める</summary>
       <p class="sub">1 年進めるたびと予算を変えたときに、このブラウザの中に自動でセーブします。別の端末に移すときや、念のための控えには「書き出し」を使ってください。</p>
@@ -100,7 +122,7 @@
       </div>
     </details>
   </main>
-  <script type="module" src="src/ui/app.js?v=8"></script>
+  <script type="module" src="src/ui/app.js?v=9"></script>
   <script>
     // 更新の直後などで新しいファイルと古いファイルが混ざると、読み込みが止まることがある。そのときは知らせる
     setTimeout(() => {

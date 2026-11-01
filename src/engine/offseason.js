@@ -3,6 +3,7 @@
 // 前 (preseason): 年俸の予算とクラブの規模、契約の更新、海外への引き抜き、放出、補強、施設、その年の調子。
 // 後 (offseason): 選手が年を取って伸びる・衰える、引退、契約の残りが減る、監督の交代。
 
+import { moveAbroad } from "./abroad.js";
 import { MIN_SHAPE, newContract, playerValue, wantsBiggerClub } from "./contracts.js";
 import {
   autoBudget,
@@ -30,7 +31,7 @@ import { makeManager, makeName, makePlayer, SQUAD_SHAPE } from "./world.js";
  * @typedef {{ clubId: string, budget: number | null, auto: boolean }} UserCore
  * @typedef {{ divisions: { clubIds: string[] }[], clubs: Record<string, LeagueClub>,
  *             players: Record<string, Player>, nextPlayerId: number, freeAgents: string[],
- *             user: UserCore | null }} LeagueCore
+ *             user: UserCore | null, abroad: string[] | null }} LeagueCore
  * @typedef {{ retired: number, released: number, joined: number, managersChanged: number, takeovers: string[],
  *             abroad: [name: string, clubId: string, fee: number][], leftFree: number }} OffseasonReport
  *   abroad は海外のクラブに引き抜かれた選手、leftFree は契約が切れて出ていった選手の数
@@ -243,7 +244,7 @@ export function runPreseason(league, names, rng, report) {
         f.transfers = { ...f.transfers, in: f.transfers.in + fee };
         report.abroad.push([p.name, club.id, fee]);
         club.playerIds = club.playerIds.filter((x) => x !== id);
-        delete league.players[id];
+        moveAbroad(league, p); // 自分のクラブがあるときは、海外の選手の一覧に入る（無ければ消える）
       }
     }
 

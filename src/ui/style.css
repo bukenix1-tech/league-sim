@@ -210,3 +210,24 @@ button.small:not(.secondary) { background: var(--accent); color: var(--accent-fg
 .fired { border-color: var(--g-low); }
 .fired h2 { color: var(--g-low); }
 p.neg { font-weight: bold; font-size: 0.85rem; }
+
+/* いまやること・はじめての方へ・遊び方 */
+.guide { border-color: var(--accent); }
+.todo { list-style: none; margin: 0; padding: 0; }
+.todo li { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
+.todo li::before { content: "・"; color: var(--muted); }
+.todo li > span { flex: 1 1 auto; min-width: 0; }
+.todo li.important { font-weight: bold; }
+.todo li.important::before { content: "！"; color: var(--g-low); }
+.todo button { flex: 0 0 auto; margin: 0; }
+.flow { margin: 6px 0; padding-left: 1.4em; font-size: 0.9rem; }
+.flow li { margin: 4px 0; }
+.help h3 { font-size: 0.95rem; margin: 12px 0 4px; }
+.help ul { margin: 4px 0; padding-left: 1.2em; font-size: 0.9rem; }
+.help summary { font-weight: bold; }
+
+/* 移籍の一覧: いる国とリーグ */
+.pname { display: flex; flex-direction: column; line-height: 1.25; }
+.pname > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loc { font-size: 0.7rem; color: var(--muted); }
+.loc-abroad { color: #2563eb; }

@@ -45,6 +45,8 @@ const MIGRATIONS = {
     midSeason: null,
     user: save.user ? { ...save.user, candidates: [], fired: null } : null,
   }),
+  // 版 4 → 5: 海外の選手の一覧（読んだあと画面の方で ensureAbroad を呼んで作る）
+  4: (save) => ({ ...save, abroad: null }),
 };
 
 /** @param {League} league */
@@ -71,7 +73,7 @@ export function parseSave(text) {
     if (!migrate) throw new Error(`版 ${save.version} のセーブは読めません`);
     save = { ...migrate(save), version: save.version + 1 };
   }
-  for (const key of ["seed", "year", "nextPlayerId", "divisions", "clubs", "players", "history", "user", "freeAgents", "midSeason"]) {
+  for (const key of ["seed", "year", "nextPlayerId", "divisions", "clubs", "players", "history", "user", "freeAgents", "midSeason", "abroad"]) {
     if (!(key in save)) throw new Error(`セーブに ${key} がありません`);
   }
   return save;

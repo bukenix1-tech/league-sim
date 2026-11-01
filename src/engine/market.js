@@ -4,6 +4,7 @@
 
 import { contractYearsFor, MAX_SQUAD, newContract, playerValue, STAR_GAP } from "./contracts.js";
 import { facilityCost, FACILITY_MAX, forecastRevenue, managerWage, STADIUM_MAX, STADIUM_STEP } from "./finance.js";
+import { moveAbroad } from "./abroad.js";
 import { divisionOf, squadLevel, withoutContract } from "./offseason.js";
 import { START_TRUST } from "./owner.js";
 import { overall } from "./players.js";
@@ -13,7 +14,8 @@ import { overall } from "./players.js";
  * @typedef {import("./players.js").Player} Player
  * @typedef {import("./players.js").Position} Position
  * @typedef {{ player: Player, clubId: string | null, fee: number, wage: number, willing: boolean }} MarketEntry
- *   clubId が null ならフリー（移籍金なし）。willing は自分のクラブに来てくれるか
+ *   clubId が null ならフリーか海外の選手（player.abroad があれば海外。移籍金がかかる）。willing は自分のクラブに来てくれるか
+ * @typedef {"all" | "home" | "abroad" | "free"} Where  どこの選手を出すか
  */
 
 /** @param {number} x */
@@ -42,12 +44,12 @@ export function spendLimit(league) {
 export const willJoin = (league, p) => overall(p) <= mine(league).level + STAR_GAP;
 
 /**
- * 取れる選手の一覧（フリーと、ほかのクラブの選手）。総合力の高い順に limit 人まで。
- * onlyWilling なら、自分のクラブに来てくれる選手だけ（画面ではこちらを使う）。
- * @param {League} league @param {Position | null} pos @param {number} [limit] @param {boolean} [onlyWilling]
+ * 取れる選手の一覧（フリー、ほかのクラブの選手、海外の選手）。総合力の高い順に limit 人まで。
+ * onlyWilling なら、自分のクラブに来てくれる選手だけ（画面ではこちらを使う）。where で国内・海外・フリーにしぼれる。
+ * @param {League} league @param {Position | null} pos @param {number} [limit] @param {boolean} [onlyWilling] @param {Where} [where]
  * @returns {MarketEntry[]}
  */
-export function marketList(league, pos, limit = 40, onlyWilling = true) {
+export function marketList(league, pos, limit = 40, onlyWilling = true, where = "all") {
   const myId = mine(league).id;
   /** @type {MarketEntry[]} */
   const list = [];
@@ -55,13 +57,16 @@ export function marketList(league, pos, limit = 40, onlyWilling = true) {
     if (pos && p.pos !== pos) return;
     const willing = willJoin(league, p);
     if (onlyWilling && !willing) return;
-    list.push({ player: p, clubId, fee: clubId ? playerValue(p) : 0, wage: newContract(p).wage, willing });
+    list.push({ player: p, clubId, fee: clubId || p.abroad ? playerValue(p) : 0, wage: newContract(p).wage, willing });
   };
-  for (const id of league.freeAgents) if (league.players[id]) add(league.players[id], null);
-  for (const club of Object.values(league.clubs)) {
-    if (club.id === myId) continue;
-    for (const id of club.playerIds) add(league.players[id], club.id);
+  if (where === "all" || where === "free") for (const id of league.freeAgents) if (league.players[id]) add(league.players[id], null);
+  if (where === "all" || where === "home") {
+    for (const club of Object.values(league.clubs)) {
+      if (club.id === myId) continue;
+      for (const id of club.playerIds) add(league.players[id], club.id);
+    }
   }
+  if (where === "all" || where === "abroad") for (const id of league.abroad ?? []) if (league.players[id]) add(league.players[id], null);
   return list.sort((a, b) => overall(b.player) - overall(a.player)).slice(0, limit);
 }
 
@@ -79,7 +84,8 @@ export function buyPlayer(league, playerId, years) {
   if (club.playerIds.length >= MAX_SQUAD) throw new Error(`選手は ${MAX_SQUAD} 人までです。先に誰かを出してください`);
   if (!willJoin(L, p)) throw new Error(`${p.name} は、もっと大きいクラブでないと来てくれません`);
   const seller = Object.values(L.clubs).find((c) => c.playerIds.includes(playerId));
-  const fee = seller ? playerValue(p) : 0;
+  const fromAbroad = Boolean(p.abroad);
+  const fee = seller || fromAbroad ? playerValue(p) : 0;
   if (fee > spendLimit(L)) throw new Error(`お金が足りません（移籍金 ${fee} 億円）`);
   if (seller) {
     seller.playerIds = seller.playerIds.filter((x) => x !== playerId);
@@ -87,10 +93,16 @@ export function buyPlayer(league, playerId, years) {
     seller.finance.transfers = { ...seller.finance.transfers, in: seller.finance.transfers.in + fee };
     club.finance.cash = round1(club.finance.cash - fee);
     club.finance.transfers = { ...club.finance.transfers, out: club.finance.transfers.out + fee };
+  } else if (fromAbroad) {
+    // 海外のクラブに払う（リーグの外へ出ていくお金）
+    L.abroad = (L.abroad ?? []).filter((x) => x !== playerId);
+    club.finance.cash = round1(club.finance.cash - fee);
+    club.finance.transfers = { ...club.finance.transfers, out: club.finance.transfers.out + fee };
   } else {
     L.freeAgents = L.freeAgents.filter((x) => x !== playerId);
   }
-  L.players[playerId] = { ...p, contract: newContract(p, years ?? contractYearsFor(p.age)) };
+  const { abroad: _, ...rest } = p;
+  L.players[playerId] = { ...rest, contract: newContract(p, years ?? contractYearsFor(p.age)) };
   club.playerIds.push(playerId);
   return afterChange(L);
 }
@@ -175,7 +187,7 @@ export function acceptBid(league, playerId) {
   const bid = user.bids.find((b) => b.playerId === playerId);
   if (!bid) throw new Error("そのオファーはもうありません");
   club.playerIds = club.playerIds.filter((x) => x !== playerId);
-  delete L.players[playerId];
+  moveAbroad(L, L.players[playerId]);
   club.finance.cash = round1(club.finance.cash + bid.fee);
   club.finance.transfers = { ...club.finance.transfers, in: club.finance.transfers.in + bid.fee };
   L.user = { ...user, bids: user.bids.filter((b) => b.playerId !== playerId) };

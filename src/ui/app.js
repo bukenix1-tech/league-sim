@@ -39,6 +39,7 @@ import {
   AUTO_PROMOTED,
   chooseClub,
   createLeague,
+  ensureAbroad,
   FIRE_TRUST,
   PLAYOFF_FROM,
   PLAYOFF_TO,
@@ -50,6 +51,8 @@ import {
   seasonGoal,
   setBudget,
 } from "../engine/league.js";
+import { HOME_COUNTRY, locationOf } from "../engine/abroad.js";
+import { guide } from "../engine/guide.js";
 import { loadProgress } from "../engine/season.js";
 import { standings } from "../engine/table.js";
 import { divisionOf, seasonBudget } from "../engine/offseason.js";
@@ -222,6 +225,8 @@ function renderOffice() {
   /** @type {HTMLElement[]} */
   const nodes = [];
   if (u.fired) nodes.push(firedCard());
+  else nodes.push(guideCard());
+  if (L().history.length === 0 && !inWinter() && !u.fired) nodes.push(introCard());
   nodes.push(head);
   const offers = u.fired ? null : offersCard();
   if (offers) nodes.push(offers);
@@ -294,6 +299,53 @@ function facilitiesCard() {
     row("練習場", `${f.facilities.training} / ${FACILITY_MAX}`, `選手の伸びが ${Math.round(trainingBonus(f.facilities) * 100)}% よくなる`, "training", f.facilities.training >= FACILITY_MAX),
     row("育成", `${f.facilities.youth} / ${FACILITY_MAX}`, `育成の若手が強く、伸びしろも大きくなる`, "youth", f.facilities.youth >= FACILITY_MAX),
     el("p", "sub", `維持費 年 ${oku(facilityUpkeep(f))}`),
+  );
+  return card;
+}
+
+const TAB_LABEL = { office: "経営", market: "移籍", table: "順位", club: "クラブ" };
+
+/** 「いまやること」のカード */
+function guideCard() {
+  const g = guide(L());
+  const card = el("div", "card guide");
+  card.append(el("h2", "", `いまやること — ${g.title}`));
+  const ul = el("ul", "todo");
+  for (const item of g.items) {
+    const li = el("li", item.important ? "important" : "");
+    li.append(el("span", "", item.text));
+    if (item.tab) {
+      const tab = item.tab;
+      const b = el("button", "secondary small", `${TAB_LABEL[tab]}へ`);
+      b.addEventListener("click", () => {
+        showTab(tab);
+        window.scrollTo({ top: 0 });
+      });
+      li.append(b);
+    }
+    ul.append(li);
+  }
+  card.append(ul);
+  return card;
+}
+
+/** 初めての人向けの、1 年の流れの案内（最初の年だけ） */
+function introCard() {
+  const card = el("div", "card intro");
+  card.append(
+    el("h2", "", "はじめての方へ — 1 年の流れ"),
+    (() => {
+      const ol = el("ol", "flow");
+      for (const t of [
+        "夏（シーズン前）: 選手の獲得・放出・契約の更新、年俸の予算、入場料、施設、監督を決める",
+        "「前半を進める」: シーズンの半分まで試合が進む（試合は監督に任せて自動）",
+        "冬: 冬の移籍の時期。足りない所を補強する",
+        "「後半を進める」: 残りの試合、昇格と降格、お金の出入り、オーナーの評価",
+        "シーズンの後: 選手が年を取り、引退と新人。次の夏へ",
+      ]) ol.append(el("li", "", t));
+      return ol;
+    })(),
+    el("p", "sub", "目標は、オーナーの期待に応えながらクラブを大きくし、1 部で優勝すること。信頼を失ったり借金がふくらむとクビになります。下の「遊び方」にもくわしく書いてあります。"),
   );
   return card;
 }
@@ -445,8 +497,15 @@ function wagesCard() {
   return card;
 }
 
-/** 移籍タブの位置のしぼりこみ */
+/** 移籍タブの位置と場所のしぼりこみ */
 let marketPos = /** @type {import("../engine/players.js").Position | null} */ (null);
+let marketWhere = /** @type {import("../engine/market.js").Where} */ ("all");
+
+/** 選手のいる所を短く @param {string} playerId */
+function whereText(playerId) {
+  const loc = locationOf(L(), playerId);
+  return loc.league ? `${loc.country}・${loc.league}・${loc.club}` : loc.club;
+}
 
 function renderMarket() {
   const u = L().user;
@@ -557,7 +616,7 @@ function renderMarket() {
 
   // 取れる選手
   const market = el("div", "card");
-  market.append(el("h2", "", "取れる選手"), el("p", "sub", `使えるお金 ${oku(spendLimit(L()))}（手元のお金 + 収入の見込みの 3 割まで借金できる）。クラブの規模を大きく上回る選手は来てくれないので出していません。`));
+  market.append(el("h2", "", "取れる選手"), el("p", "sub", `使えるお金 ${oku(spendLimit(L()))}（手元のお金 + 収入の見込みの 3 割まで借金できる）。${HOME_COUNTRY}の 1 部・2 部、海外（スペイン・ドイツ・イタリア・フランスの 1 部・2 部）、フリーの選手が取れます。クラブの規模を大きく上回る選手は来てくれないので出していません。`));
   const filter = el("div", "seg");
   for (const pos of /** @type {const} */ ([null, "GK", "DF", "MF", "FW"])) {
     const b = el("button", "", pos ?? "全部");
@@ -569,24 +628,37 @@ function renderMarket() {
     filter.append(b);
   }
   market.append(filter);
+  const whereSeg = el("div", "seg");
+  for (const [w, label] of /** @type {const} */ ([["all", "全部"], ["home", HOME_COUNTRY], ["abroad", "海外"], ["free", "フリー"]])) {
+    const b = el("button", "", label);
+    b.setAttribute("aria-pressed", String(marketWhere === w));
+    b.addEventListener("click", () => {
+      marketWhere = w;
+      renderMarket();
+    });
+    whereSeg.append(b);
+  }
+  market.append(whereSeg);
   const mlist = el("ul", "plist");
-  for (const e of marketList(L(), marketPos, 30)) {
+  for (const e of marketList(L(), marketPos, 30, true, marketWhere)) {
     const p = e.player;
     const li = el("li");
     const head = el("button", "prow");
+    const nameCell = el("span", "pname");
+    nameCell.append(el("span", "", p.name), el("span", `loc${p.abroad ? " loc-abroad" : ""}`, whereText(p.id)));
     head.append(
       el("span", `pos pos-${p.pos}`, p.pos),
-      el("span", "pname", `${p.name}`),
+      nameCell,
       el("span", "pnum", `${grade(overall(p))} ${overall(p)}`),
       el("span", "pnum", `${p.age} 歳`),
-      el("span", "pnum wide", e.clubId ? oku(e.fee) : "フリー"),
+      el("span", "pnum wide", e.fee > 0 ? oku(e.fee) : "フリー"),
     );
     const body = el("div", "pbody");
     body.hidden = true;
-    body.append(playerDetail(p), el("p", "sub", `${e.clubId ? clubName(e.clubId) : "どこのクラブにもいない（移籍金なし）"}・年俸 ${oku(e.wage)}`));
-    const buy = el("button", "small", e.clubId ? `獲得（移籍金 ${oku(e.fee)}）` : "獲得（移籍金なし）");
+    body.append(playerDetail(p), el("p", "sub", `いま: ${whereText(p.id)}・${p.age} 歳・年俸 ${oku(e.wage)}${p.abroad ? "（移籍金は海外のクラブに払う）" : ""}`));
+    const buy = el("button", "small", e.fee > 0 ? `獲得（移籍金 ${oku(e.fee)}）` : "獲得（移籍金なし）");
     buy.addEventListener("click", () => {
-      if (confirm(`${p.name} を取りますか？${e.clubId ? `移籍金 ${oku(e.fee)}、` : ""}年俸 ${oku(e.wage)}`)) act(() => buyPlayer(L(), p.id), `${p.name} を取りました`);
+      if (confirm(`${p.name}（${whereText(p.id)}）を取りますか？${e.fee > 0 ? `移籍金 ${oku(e.fee)}、` : ""}年俸 ${oku(e.wage)}`)) act(() => buyPlayer(L(), p.id), `${p.name} を取りました`);
     });
     body.append(buy);
     head.addEventListener("click", () => {
@@ -1055,6 +1127,11 @@ async function main() {
     ui.league = createLeague(clubData, names, randomSeed());
     await save();
   }
+  // 古いセーブで、海外の選手の一覧がまだ無ければ作る
+  if (ui.league.user && !ui.league.abroad) {
+    ui.league = ensureAbroad(ui.league, names);
+    await save();
+  }
   // 自分のクラブがまだ決まっていなければ、選ぶ画面から
   const showCurrent = () => (L().user ? showGame() : showPicker());
   showCurrent();
@@ -1082,7 +1159,7 @@ async function main() {
     input.value = "";
     if (!file) return;
     try {
-      ui.league = parseSave(await file.text());
+      ui.league = ensureAbroad(parseSave(await file.text()), names);
       ui.rounds = null;
       showCurrent();
       await save();

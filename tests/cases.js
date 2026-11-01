@@ -10,12 +10,14 @@ import { makeSchedule } from "../src/engine/schedule.js";
 import { fatigueLoss, injuryChance, playSeason } from "../src/engine/season.js";
 import { addResult, createTable, goalDiff, points, standings } from "../src/engine/table.js";
 import { generateWorld, makePlayer, SQUAD_SHAPE } from "../src/engine/world.js";
-import { chooseClub, createLeague, playFirstHalf, playSecondHalf, playYear, RELEGATED, SAVE_VERSION, seasonGoal, setBudget } from "../src/engine/league.js";
+import { chooseClub, createLeague, ensureAbroad, playFirstHalf, playSecondHalf, playYear, RELEGATED, SAVE_VERSION, seasonGoal, setBudget } from "../src/engine/league.js";
 import { attendance, autoBudget, budgetForLevel, budgetRange, initialFinance, levelFromBudget, nextPopularity, revenue, totalRevenue, wage } from "../src/engine/finance.js";
 import { evaluate, ownerGoal } from "../src/engine/owner.js";
 import { playerValue } from "../src/engine/contracts.js";
+import { COUNTRIES, HOME_COUNTRY, locationOf, POOL_SIZE } from "../src/engine/abroad.js";
+import { guide } from "../src/engine/guide.js";
 import { dividend, trainingBonus } from "../src/engine/finance.js";
-import { acceptOffer, buyPlayer, hireManager, marketList, releaseCost, releasePlayer, renewContract, sackCost, sellPlayer, setAutoTransfers, setTicket, spendLimit, upgradeFacility, willJoin } from "../src/engine/market.js";
+import { acceptBid, acceptOffer, buyPlayer, hireManager, marketList, releaseCost, releasePlayer, renewContract, sackCost, sellPlayer, setAutoTransfers, setTicket, spendLimit, upgradeFacility, willJoin } from "../src/engine/market.js";
 import { retireChance } from "../src/engine/offseason.js";
 import { parseSave, serialize } from "../src/engine/save.js";
 
@@ -658,9 +660,12 @@ export function makeCases(clubJson, nameJson) {
         ok(entry, "取れる選手がいない");
         if (!entry) return;
         const bought = buyPlayer(L, entry.player.id);
-        const { seasons } = playSecondHalf(bought, names);
-        const st = seasons.flatMap((s) => [...s.stats.entries()]).find(([id]) => id === entry.player.id);
-        ok(st && st[1].club === "ykc", "後半の記録が自分のクラブになっていない");
+        const { seasons, league: next } = playSecondHalf(bought, names);
+        // 別の部のクラブから取ったときは、前の部の記録（前のクラブ）と、自分の部の記録の両方がある
+        const mineStats = seasons.flatMap((s) => [...s.stats.entries()]).filter(([id, st]) => id === entry.player.id && st.club === "ykc");
+        eq(mineStats.length, 1, "後半の記録が自分のクラブに無い");
+        const all = seasons.flatMap((s) => [...s.stats.entries()]).filter(([id]) => id === entry.player.id);
+        eq(next.players[entry.player.id].last?.apps, all.reduce((sum, [, st]) => sum + st.apps, 0), "前のシーズンの記録が足されていない");
       },
     },
     {
@@ -740,6 +745,117 @@ export function makeCases(clubJson, nameJson) {
         ok(Object.values(fromV2.players).every((p) => (p.contract?.wage ?? 0) > 0), "契約が足されていない");
         eq(fromV2.user?.clubId, "ykc");
         eq(playYear(fromV2, names).league.year, after.year + 1);
+      },
+    },
+    {
+      name: "海外: 自分のクラブを選ぶと海外の選手が 96 人そろい、国は実在の 4 か国、部は 1 部か 2 部",
+      fn() {
+        const mine = chooseClub(after, "ykc", names);
+        const pool = mine.abroad ?? [];
+        eq(pool.length, POOL_SIZE);
+        const countries = new Set(COUNTRIES.map((c) => c.name));
+        for (const id of pool) {
+          const a = mine.players[id].abroad;
+          ok(a && countries.has(a.country) && (a.div === 0 || a.div === 1) && a.club, `${id} の所属がおかしい`);
+          ok(!Object.values(mine.clubs).some((c) => c.playerIds.includes(id)), "海外の選手が国内のクラブにもいる");
+        }
+        // 自分のクラブが無いとき（50 年の確かめなど）は作らない
+        eq(after.abroad, null);
+      },
+    },
+    {
+      name: "海外: 1 部の選手は 2 部の選手より強い。1 年たつと一覧が入れ替わり、96 人に戻る",
+      fn() {
+        const mine = chooseClub(after, "ykc", names);
+        const pool = (mine.abroad ?? []).map((id) => mine.players[id]);
+        const avg = (/** @type {number} */ d) => {
+          const xs = pool.filter((p) => p.abroad?.div === d).map((p) => overallAt(p));
+          return xs.reduce((a, b) => a + b, 0) / xs.length;
+        };
+        ok(avg(0) > avg(1) + 8, `1 部 ${avg(0)} / 2 部 ${avg(1)}`);
+        const next = playYear(mine, names).league;
+        eq(next.abroad?.length, POOL_SIZE);
+        const stayed = (next.abroad ?? []).filter((id) => (mine.abroad ?? []).includes(id)).length;
+        ok(stayed > 30 && stayed < POOL_SIZE, `残った人数 ${stayed}`);
+      },
+    },
+    {
+      name: "海外: 海外の選手を取ると、移籍金は外へ出て、選手は自分のクラブの選手になる",
+      fn() {
+        const mine = structuredClone(chooseClub(after, "ykc", names));
+        mine.clubs.ykc.finance.cash = 300;
+        const entry = marketList(mine, null, 400, true, "abroad")[0];
+        ok(entry && entry.player.abroad, "海外の選手が一覧に出ない");
+        if (!entry) return;
+        const L = buyPlayer(mine, entry.player.id);
+        ok(Math.abs(L.clubs.ykc.finance.cash - (300 - entry.fee)) < 0.11, "移籍金");
+        ok(entry.fee > 0, "海外の選手なのに移籍金が 0");
+        ok(L.clubs.ykc.playerIds.includes(entry.player.id), "自分のクラブにいない");
+        ok(!L.players[entry.player.id].abroad, "海外の印が残っている");
+        ok(!(L.abroad ?? []).includes(entry.player.id), "海外の一覧に残っている");
+        const loc = locationOf(L, entry.player.id);
+        eq([loc.country, loc.club], [HOME_COUNTRY, L.clubs.ykc.short]);
+      },
+    },
+    {
+      name: "海外: 一覧は国内・海外・フリーでしぼれ、いる所は国・部・クラブで出る",
+      fn() {
+        const mine = chooseClub(after, "ykc", names);
+        ok(marketList(mine, null, 500, false, "abroad").every((e) => e.player.abroad), "海外にしぼれない");
+        ok(marketList(mine, null, 500, false, "home").every((e) => e.clubId), "国内にしぼれない");
+        ok(marketList(mine, null, 500, false, "free").every((e) => !e.clubId && !e.player.abroad), "フリーにしぼれない");
+        const abroadId = /** @type {string[]} */ (mine.abroad)[0];
+        const a = locationOf(mine, abroadId);
+        ok(a.country !== HOME_COUNTRY && /^[12] 部$/.test(a.league), `${a.country} ${a.league}`);
+        const homeId = mine.clubs.nbc.playerIds[0];
+        eq(locationOf(mine, homeId), { country: HOME_COUNTRY, league: mine.divisions.find((d) => d.clubIds.includes("nbc"))?.name, club: mine.clubs.nbc.short });
+      },
+    },
+    {
+      name: "海外: 海外のオファーを受けた選手は、海外の一覧に入る",
+      fn() {
+        const mine = chooseClub(after, "ykc", names);
+        const pid = mine.clubs.ykc.playerIds[0];
+        const L = { ...mine, user: { .../** @type {any} */ (mine.user), bids: [{ playerId: pid, fee: 10 }] } };
+        const sold = acceptBid(L, pid);
+        ok((sold.abroad ?? []).includes(pid), "海外の一覧にいない");
+        ok(sold.players[pid].abroad?.div === 0, "海外の 1 部でない");
+      },
+    },
+    {
+      name: "手引き: 夏・冬・クビで、やることが変わる",
+      fn() {
+        const mine = setAutoTransfers(chooseClub(after, "ykc", names), false);
+        const summer = guide(mine);
+        eq(summer.phase, "summer");
+        ok(summer.items.some((i) => i.text.includes("前半を進める")), "夏に「前半を進める」が無い");
+        ok(summer.items.some((i) => i.tab === "market"), "夏に移籍タブへの案内が無い");
+        const winter = guide(playFirstHalf(mine, names).league);
+        eq(winter.phase, "winter");
+        ok(winter.items.some((i) => i.text.includes("後半を進める")), "冬に「後半を進める」が無い");
+        ok(winter.items.some((i) => i.text.includes("いま ")), "冬に今の順位が無い");
+        const fired = guide({ ...mine, user: { .../** @type {any} */ (mine.user), fired: "テスト" } });
+        eq(fired.phase, "fired");
+        eq(guide(after).phase, "pick");
+        // 自分で補強していて契約の切れた選手がいれば、先にやることとして出る
+        const L = structuredClone(mine);
+        const pid = L.clubs.ykc.playerIds[0];
+        L.players[pid] = { ...L.players[pid], contract: { years: 0, wage: 1 } };
+        ok(guide(L).items.some((i) => i.important && i.text.includes("契約が切れる")), "契約切れが出ない");
+      },
+    },
+    {
+      name: "セーブ: 版 4（段階 6）のセーブも読め、海外の選手の一覧が作られる",
+      fn() {
+        const v4 = JSON.parse(serialize(chooseClub(after, "ykc")));
+        v4.version = 4;
+        delete v4.abroad;
+        const loaded = parseSave(JSON.stringify(v4));
+        eq(loaded.version, SAVE_VERSION);
+        eq(loaded.abroad, null);
+        const withPool = ensureAbroad(loaded, names);
+        eq(withPool.abroad?.length, POOL_SIZE);
+        eq(playYear(withPool, names).league.year, after.year + 1);
       },
     },
   ];

@@ -13,7 +13,8 @@ import { normal, pick } from "./rng.js";
  * @typedef {{ apps: number, goals: number, assists: number, injuries: number }} LastSeason  前のシーズンの記録
  * @typedef {{ years: number, wage: number }} Contract  残りの年数（0 は今の夏で切れる）と年俸（億円）
  * @typedef {{ id: string, name: string, pos: Position, age: number, attrs: Attrs,
- *             potential: number, traits: Trait[], career?: Career, last?: LastSeason, contract?: Contract }} Player
+ *             potential: number, traits: Trait[], career?: Career, last?: LastSeason, contract?: Contract,
+ *             abroad?: import("./abroad.js").AbroadInfo }} Player  abroad は海外のクラブにいる選手だけ
  *   potential は伸びきったときの総合力の目安（若い選手ほど今との差が大きい）
  */
 
