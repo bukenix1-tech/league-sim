@@ -2,7 +2,7 @@
 // 最初に開いたときにゲームのファイルを全部しまい、次からはしまったものを使う。
 // 新しい版を出したら VERSION を上げる。すると裏で新しいファイルをしまい直し、次に開いたときから新しい版になる。
 
-const VERSION = "v7";
+const VERSION = "v8";
 const CACHE = `league-sim-${VERSION}`;
 
 const FILES = [
@@ -14,8 +14,8 @@ const FILES = [
   "icons/icon-192.png",
   "icons/icon-512.png",
   "icons/icon-maskable-512.png",
-  "src/ui/style.css?v=7",
-  "src/ui/app.js?v=7",
+  "src/ui/style.css?v=8",
+  "src/ui/app.js?v=8",
   "src/ui/storage.js",
   "data/clubs.json",
   "data/names.json",

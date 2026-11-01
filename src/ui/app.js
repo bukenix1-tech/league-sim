@@ -88,6 +88,7 @@ const ui = {
   div: 0,
   clubId: "",
   busy: false,
+  /** 選手と監督の名前の材料（読み込んだあとに入る） @type {import("../engine/clubs.js").NameData | null} */ names: null,
 };
 
 const L = () => /** @type {League} */ (ui.league);
@@ -616,7 +617,7 @@ function renderPicker(div) {
       );
       b.addEventListener("click", async () => {
         if (!confirm(`${c.name} の経営者になりますか？`)) return;
-        ui.league = chooseClub(L(), id, names);
+        ui.league = chooseClub(L(), id, ui.names ?? undefined);
         ui.clubId = id;
         await save();
         showGame();
@@ -1033,6 +1034,7 @@ async function main() {
   );
   const clubData = parseClubData(clubJson);
   const names = parseNameData(nameJson);
+  ui.names = names;
 
   /** @type {string | undefined} */
   let stored;
@@ -1100,6 +1102,14 @@ async function main() {
   });
   setBusy(false);
 }
+
+// 押したときなどに思わぬ失敗があったら、黙って止まらずに画面に出す
+window.addEventListener("unhandledrejection", (e) => {
+  $("status").textContent = `うまく動きませんでした: ${e.reason?.message ?? e.reason}（ページを開き直してください）`;
+});
+window.addEventListener("error", (e) => {
+  $("status").textContent = `うまく動きませんでした: ${e.message}（ページを開き直してください）`;
+});
 
 // 電波が無くても開けるようにする（https のとき）。手元の開発中は、ファイルを直してもすぐ映るよう、
 // アドレスに ?pwa を付けたときだけ動かす
